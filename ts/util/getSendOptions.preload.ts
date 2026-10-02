@@ -90,9 +90,7 @@ export async function getSendOptions(
   const { accessKey } = conversationAttrs;
   const { e164, serviceId } = conversationAttrs;
 
-  let sealedSender = conversationAttrs.sealedSender as
-    | SEALED_SENDER
-    | undefined;
+  let sealedSender = conversationAttrs.sealedSender;
 
   const senderCertificate =
     await getSenderCertificateForDirectConversation(conversationAttrs);
@@ -107,10 +105,12 @@ export async function getSendOptions(
     case SEALED_SENDER.DISABLED:
       // Try to get GSE token
       if (serviceId != null && groupId != null) {
+        const alreadyInQueue = true;
         const { state: groupSendEndorsementState, didRefreshGroupState } =
           await maybeCreateGroupSendEndorsementState(
             groupId,
-            alreadyRefreshedGroupState
+            alreadyRefreshedGroupState,
+            alreadyInQueue
           );
 
         if (

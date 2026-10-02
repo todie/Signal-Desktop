@@ -1,7 +1,7 @@
 // Copyright 2022 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import React, { memo, useCallback, useEffect } from 'react';
+import { memo, useCallback, useEffect, type JSX } from 'react';
 import { useSelector } from 'react-redux';
 import { SmartStoryCreator } from './StoryCreator.preload.tsx';
 import { renderToastManagerWithoutMegaphone } from './ToastManager.preload.tsx';
@@ -10,7 +10,7 @@ import { getMaximumOutgoingVideoSize } from '../../types/AttachmentSize.std.ts';
 import { getValue, type ConfigKeyType } from '../../RemoteConfig.dom.ts';
 import {
   getMe,
-  getOtherTabsUnreadStats,
+  getOtherTabsUnreadCount,
 } from '../selectors/conversations.dom.ts';
 import { getIntl, getTheme } from '../selectors/user.std.ts';
 import { getPreferredBadgeSelector } from '../selectors/badges.preload.ts';
@@ -38,7 +38,7 @@ import { getIsStoriesSettingsVisible } from '../selectors/globalModals.std.ts';
 import type { StoryViewType } from '../../types/Stories.std.ts';
 import { ForwardMessagesModalType } from '../../components/ForwardMessagesModal.dom.tsx';
 
-function renderStoryCreator(): React.JSX.Element {
+function renderStoryCreator(): JSX.Element {
   return <SmartStoryCreator />;
 }
 
@@ -65,7 +65,7 @@ export const SmartStoriesTab = memo(function SmartStoriesTab() {
   const hasViewReceiptSetting = useSelector(getHasStoryViewReceiptSetting);
   const hasPendingUpdate = useSelector(getHasPendingUpdate);
   const hasFailedStorySends = useSelector(getHasAnyFailedStorySends);
-  const otherTabsUnreadStats = useSelector(getOtherTabsUnreadStats);
+  const otherTabsUnreadCount = useSelector(getOtherTabsUnreadCount);
   const remoteConfig = useSelector(getRemoteConfig);
 
   const maxAttachmentVideoSize = getMaximumOutgoingVideoSize(
@@ -108,7 +108,7 @@ export const SmartStoriesTab = memo(function SmartStoriesTab() {
 
   return (
     <StoriesTab
-      otherTabsUnreadStats={otherTabsUnreadStats}
+      otherTabsUnreadCount={otherTabsUnreadCount}
       addStoryData={addStoryData}
       getPreferredBadge={getPreferredBadge}
       hasFailedStorySends={hasFailedStorySends}

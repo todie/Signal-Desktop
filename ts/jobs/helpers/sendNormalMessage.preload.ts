@@ -291,6 +291,10 @@ export async function sendNormalMessage(
         });
         return;
       }
+      if (!window.ConversationController.doWeHaveOtherDevices()) {
+        log.info('We have no other devices; not sending sync message');
+        return;
+      }
 
       // We're sending to Note to Self or a 'lonely group' with just us in it
       // or sending a story to a group where all other users don't have the stories
@@ -326,7 +330,6 @@ export async function sendNormalMessage(
       });
     } else {
       const conversationType = conversation.get('type');
-      const sendOptions = await getSendOptions(conversation.attributes);
 
       let innerPromise: Promise<CallbackResultType>;
       if (conversationType === GROUP) {
@@ -345,9 +348,10 @@ export async function sendNormalMessage(
 
         log.info('sending group message');
         innerPromise = conversation.queueJob(
-          'conversationQueue/sendNormalMessage',
-          abortSignal =>
-            sendToGroup({
+          'conversationQueue/sendNormalMessage/group',
+          async abortSignal => {
+            const sendOptions = await getSendOptions(conversation.attributes);
+            return sendToGroup({
               abortSignal,
               contentHint: ContentHint.Resendable,
               groupSendOptions: {
@@ -376,7 +380,8 @@ export async function sendNormalMessage(
               sendType: 'message',
               story: Boolean(storyContext),
               urgent: true,
-            })
+            });
+          }
         );
       } else {
         const [ok, refusal] = shouldSendToDirectConversation(conversation);
@@ -391,36 +396,43 @@ export async function sendNormalMessage(
         }
 
         log.info('sending direct message');
-        innerPromise = messaging.sendMessageToServiceId({
-          // oxlint-disable-next-line typescript/no-non-null-assertion
-          serviceId: recipientServiceIdsWithoutMe[0]!,
-          messageOptions: {
-            attachments,
-            body,
-            bodyRanges,
-            contact,
-            expireTimer,
-            expireTimerVersion: conversation.getExpireTimerVersion(),
-            isViewOnce,
-            preview,
-            profileKey,
-            quote,
-            sticker,
-            storyContext,
-            reaction,
-            targetTimestampForEdit: editedMessageTimestamp
-              ? targetOfThisEditTimestamp
-              : undefined,
-            pollCreate: poll,
-            timestamp: targetTimestamp,
-          },
-          contentHint: ContentHint.Resendable,
-          groupId: undefined,
-          options: sendOptions,
-          // Note: 1:1 story replies should not set story=true -   they aren't group sends
-          urgent: true,
-          includePniSignatureMessage: true,
-        });
+
+        innerPromise = conversation.queueJob(
+          'conversationQueue/sendNormalMessage/direct',
+          async () => {
+            const sendOptions = await getSendOptions(conversation.attributes);
+            return messaging.sendMessageToServiceId({
+              // oxlint-disable-next-line typescript/no-non-null-assertion
+              serviceId: recipientServiceIdsWithoutMe[0]!,
+              messageOptions: {
+                attachments,
+                body,
+                bodyRanges,
+                contact,
+                expireTimer,
+                expireTimerVersion: conversation.getExpireTimerVersion(),
+                isViewOnce,
+                preview,
+                profileKey,
+                quote,
+                sticker,
+                storyContext,
+                reaction,
+                targetTimestampForEdit: editedMessageTimestamp
+                  ? targetOfThisEditTimestamp
+                  : undefined,
+                pollCreate: poll,
+                timestamp: targetTimestamp,
+              },
+              contentHint: ContentHint.Resendable,
+              groupId: undefined,
+              options: sendOptions,
+              // Note: 1:1 story replies should not set story=true -   they aren't group sends
+              urgent: true,
+              includePniSignatureMessage: true,
+            });
+          }
+        );
       }
 
       messageSendPromise = send(message, {
@@ -1241,7 +1253,8 @@ function didSendToEveryone({
     }) || {};
   const ourConversationId =
     window.ConversationController.getOurConversationIdOrThrow();
-  const areWePrimaryDevice = window.ConversationController.areWePrimaryDevice();
+  const weHaveOtherDevices =
+    window.ConversationController.doWeHaveOtherDevices();
 
   return Object.entries(sendStateByConversationId).every(
     ([conversationId, sendState]) => {
@@ -1255,7 +1268,7 @@ function didSendToEveryone({
         }
       }
 
-      if (conversationId === ourConversationId && areWePrimaryDevice) {
+      if (conversationId === ourConversationId && !weHaveOtherDevices) {
         return true;
       }
 

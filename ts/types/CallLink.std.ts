@@ -13,11 +13,6 @@ export enum CallLinkUpdateSyncType {
   Delete = 'Delete',
 }
 
-export type CallLinkUpdateData = Readonly<{
-  rootKey: Uint8Array<ArrayBuffer>;
-  adminKey: Uint8Array<ArrayBuffer> | undefined;
-}>;
-
 /**
  * Names
  */
@@ -25,7 +20,7 @@ export type CallLinkUpdateData = Readonly<{
 export const CallLinkNameMaxByteLength = 120;
 export const CallLinkNameMaxLength = 32;
 
-export const callLinkNameSchema = z.string().refine(input => {
+const callLinkNameSchema = z.string().refine(input => {
   return byteLength(input) <= 120;
 });
 
@@ -95,6 +90,7 @@ export type DefunctCallLinkType = Readonly<{
   roomId: string;
   rootKey: string;
   adminKey: string | null;
+  addedAt: number;
 }> &
   StorageServiceFieldsType;
 
@@ -102,6 +98,7 @@ export type DefunctCallLinkRecord = Readonly<{
   roomId: string;
   rootKey: Uint8Array<ArrayBuffer>;
   adminKey: Uint8Array<ArrayBuffer> | null;
+  addedAt: number;
   storageID: string | null;
   storageVersion: number | null;
   storageUnknownFields: Uint8Array<ArrayBuffer> | null;
@@ -112,6 +109,7 @@ export const defunctCallLinkRecordSchema = z.object({
   roomId: z.string(),
   rootKey: z.instanceof(Uint8Array),
   adminKey: z.instanceof(Uint8Array).nullable(),
+  addedAt: z.number(),
   storageID: z.string().nullable(),
   storageVersion: z.number().int().nullable(),
   storageUnknownFields: z.instanceof(Uint8Array).nullable(),

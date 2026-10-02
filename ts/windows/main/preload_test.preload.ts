@@ -5,7 +5,7 @@ import { inspect, parseArgs } from 'node:util';
 import { ipcRenderer as ipc } from 'electron';
 import { sync } from 'fast-glob';
 
-import chai, { assert, config as chaiConfig } from 'chai';
+import { assert, use as chaiUse, config as chaiConfig } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import { reporters, type MochaOptions } from 'mocha';
 
@@ -17,7 +17,7 @@ import { itemStorage } from '../../textsecure/Storage.preload.ts';
 import { MessageCache } from '../../services/MessageCache.preload.ts';
 import { updateRemoteConfig } from '../../test-helpers/RemoteConfigStub.dom.ts';
 
-chai.use(chaiAsPromised);
+chaiUse(chaiAsPromised);
 
 // Show actual objects instead of abbreviated errors
 chaiConfig.truncateThreshold = 0;
@@ -81,6 +81,9 @@ let workerCount = 1;
 
 window.testUtilities = {
   setup,
+  timeout: process.env.TEST_ELECTRON_TIMEOUT
+    ? parseInt(process.env.TEST_ELECTRON_TIMEOUT, 10)
+    : undefined,
 
   onTestEvent(event: unknown) {
     return ipc.invoke('ci:test-electron:event', event);
@@ -102,8 +105,11 @@ window.testUtilities = {
       badgesState: { byId: {} },
       callLinks: [],
       callHistory: [],
-      callHistoryUnreadCount: 0,
+      callHistoryUnreadCountsByConversationId: {},
       chatFolders: [],
+      emojis: {
+        recentEmojis: [],
+      },
       gifs: {
         recentGifs: [],
       },
@@ -123,9 +129,6 @@ window.testUtilities = {
         platform: 'test',
       },
       notificationProfiles: [],
-      recentEmoji: {
-        recents: [],
-      },
       stories: [],
       storyDistributionLists: [],
       donations: {
@@ -141,6 +144,7 @@ window.testUtilities = {
         packs: {},
         recentStickers: [],
         blessedPacks: {},
+        stickerManagerTab: 'all',
       },
       theme: ThemeType.dark,
     });
@@ -151,7 +155,7 @@ window.testUtilities = {
   prepareTests() {
     // oxlint-disable-next-line no-console
     console.log('Preparing tests...');
-    const files = sync('../../test-{both,electron}/**/*_test.*.ts', {
+    const files = sync('../../test-electron/**/*_test.*.{ts,tsx}', {
       absolute: true,
       cwd: __dirname,
     });

@@ -24,7 +24,7 @@ import {
   readAttachmentData,
 } from '../util/migrations.preload.ts';
 import { APPLICATION_OCTET_STREAM } from '../types/MIME.std.ts';
-import { type AciString, generateAci } from '../types/ServiceId.std.ts';
+import type { AciString } from '../types/ServiceId.std.ts';
 import { SignalService as Proto } from '../protobuf/index.std.ts';
 import {
   ParseContactsTransform,
@@ -38,6 +38,7 @@ import {
   generateKeys,
   encryptAttachmentV2ToDisk,
 } from '../AttachmentCrypto.node.ts';
+import { generateAci } from '../test-helpers/serviceIdUtils.std.ts';
 
 const log = createLogger('ContactsParser_test');
 
@@ -142,8 +143,11 @@ describe('ContactsParser', () => {
 });
 
 class SmallChunksTransform extends Transform {
-  constructor(private chunkSize: number) {
+  readonly #chunkSize: number;
+
+  constructor(chunkSize: number) {
     super();
+    this.#chunkSize = chunkSize;
   }
 
   override _transform(
@@ -159,16 +163,16 @@ class SmallChunksTransform extends Transform {
     try {
       const totalSize = incomingChunk.byteLength;
 
-      const chunkCount = Math.floor(totalSize / this.chunkSize);
-      const remainder = totalSize % this.chunkSize;
+      const chunkCount = Math.floor(totalSize / this.#chunkSize);
+      const remainder = totalSize % this.#chunkSize;
 
       for (let i = 0; i < chunkCount; i += 1) {
-        const start = i * this.chunkSize;
-        const end = start + this.chunkSize;
+        const start = i * this.#chunkSize;
+        const end = start + this.#chunkSize;
         this.push(incomingChunk.subarray(start, end));
       }
       if (remainder > 0) {
-        this.push(incomingChunk.subarray(chunkCount * this.chunkSize));
+        this.push(incomingChunk.subarray(chunkCount * this.#chunkSize));
       }
     } catch (error) {
       done(error);

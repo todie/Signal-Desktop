@@ -1,6 +1,7 @@
 // Copyright 2023 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createReadStream } from 'node:fs';
+import { LibSignalErrorBase, ErrorCode } from '@signalapp/libsignal-client';
 import type {
   AttachmentType,
   AttachmentWithHydratedData,
@@ -8,17 +9,23 @@ import type {
 } from '../types/Attachment.std.ts';
 import * as Bytes from '../Bytes.std.ts';
 import { createLogger } from '../logging/log.std.ts';
-import { MIMETypeToString, supportsIncrementalMac } from '../types/MIME.std.ts';
+import {
+  MIMETypeToString,
+  supportsIncrementalMac,
+  isAudio,
+} from '../types/MIME.std.ts';
 import { getRandomBytes } from '../Crypto.node.ts';
 import { backupsService } from '../services/backups/index.preload.ts';
 import { tusUpload } from './uploads/tusProtocol.node.ts';
 import { defaultFileReader } from './uploads/uploads.node.ts';
 import {
-  type AttachmentUploadFormResponseType,
+  type AttachmentUploadFormType,
   getAttachmentUploadForm,
   createFetchForAttachmentUpload,
   putEncryptedAttachment,
+  getConfig,
 } from '../textsecure/WebAPI.preload.ts';
+import { itemStorage } from '../textsecure/Storage.preload.ts';
 import {
   type EncryptedAttachmentV2,
   encryptAttachmentV2ToDisk,
@@ -38,6 +45,7 @@ import {
   isValidPlaintextHash,
 } from '../types/Crypto.std.ts';
 import type { ExistingAttachmentUploadData } from '../sql/Interface.std.ts';
+import { maybeRefreshRemoteConfig } from '../RemoteConfig.dom.ts';
 import { assertDev } from './assert.std.ts';
 
 const CDNS_SUPPORTING_TUS = new Set([3]);
@@ -92,12 +100,21 @@ export async function uploadAttachment(
     }));
   }
 
-  const { blurHash, caption, clientUuid, flags, height, width } = attachment;
+  const {
+    blurHash,
+    caption,
+    clientUuid,
+    flags,
+    height,
+    width,
+    audioWaveform,
+    duration,
+  } = attachment;
 
   let { fileName } = attachment;
   if (isImageAttachment(attachment) || isVideoAttachment(attachment)) {
     assertDev(
-      fileName == null,
+      fileName == null || fileName === '',
       'Filename should be stripped from visual attachments'
     );
 
@@ -123,12 +140,16 @@ export async function uploadAttachment(
     uploadTimestamp: BigInt(uploadTimestamp),
 
     contentType: MIMETypeToString(attachment.contentType),
-    fileName: fileName ?? null,
+    fileName: fileName || null,
     flags: flags ?? null,
     width: width ?? null,
     height: height ?? null,
-    caption: caption ?? null,
-    blurHash: blurHash ?? null,
+    caption: caption || null,
+    blurHash: blurHash || null,
+    audioWaveform: audioWaveform == null ? null : new Uint8Array(audioWaveform),
+    audioDurationSeconds: isAudio(attachment.contentType)
+      ? duration || null
+      : null,
 
     thumbnail: null,
   };
@@ -149,21 +170,10 @@ export async function encryptAndUploadAttachment({
   cdnNumber: number;
   encrypted: EncryptedAttachmentV2;
 }> {
-  let uploadForm: AttachmentUploadFormResponseType;
+  let uploadForm: AttachmentUploadFormType;
   let absoluteCiphertextPath: string | undefined;
 
   try {
-    switch (uploadType) {
-      case 'standard':
-        uploadForm = await getAttachmentUploadForm();
-        break;
-      case 'backup':
-        uploadForm = await backupsService.api.getMediaUploadForm();
-        break;
-      default:
-        throw missingCaseError(uploadType);
-    }
-
     const encrypted = await encryptAttachmentV2ToDisk({
       getAbsoluteAttachmentPath,
       keys,
@@ -173,6 +183,21 @@ export async function encryptAndUploadAttachment({
 
     absoluteCiphertextPath = getAbsoluteAttachmentPath(encrypted.path);
 
+    switch (uploadType) {
+      case 'standard':
+        uploadForm = await getAttachmentUploadForm({
+          uploadSize: encrypted.ciphertextSize,
+        });
+        break;
+      case 'backup':
+        uploadForm = await backupsService.api.getMediaUploadForm(
+          encrypted.ciphertextSize
+        );
+        break;
+      default:
+        throw missingCaseError(uploadType);
+    }
+
     await uploadFile({
       absoluteCiphertextPath,
       ciphertextFileSize: encrypted.ciphertextSize,
@@ -180,6 +205,17 @@ export async function encryptAndUploadAttachment({
     });
 
     return { cdnKey: uploadForm.key, cdnNumber: uploadForm.cdn, encrypted };
+  } catch (error) {
+    if (
+      error instanceof LibSignalErrorBase &&
+      error.code === ErrorCode.UploadTooLarge
+    ) {
+      await maybeRefreshRemoteConfig({
+        getConfig,
+        storage: itemStorage,
+      });
+    }
+    throw error;
   } finally {
     if (absoluteCiphertextPath) {
       await safeUnlink(absoluteCiphertextPath);
@@ -194,7 +230,7 @@ export async function uploadFile({
 }: {
   absoluteCiphertextPath: string;
   ciphertextFileSize: number;
-  uploadForm: AttachmentUploadFormResponseType;
+  uploadForm: AttachmentUploadFormType;
 }): Promise<void> {
   if (CDNS_SUPPORTING_TUS.has(uploadForm.cdn)) {
     const fetchFn = createFetchForAttachmentUpload(uploadForm);

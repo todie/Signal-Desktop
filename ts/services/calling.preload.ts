@@ -8,6 +8,7 @@ import type {
   CallSummary,
   DeviceId,
   GroupCallObserver,
+  GroupCallSvcConfig,
   PeekInfo,
   UserId,
   VideoFrameSource,
@@ -109,6 +110,7 @@ import {
   makeSfuRequest,
 } from '../textsecure/WebAPI.preload.ts';
 import { missingCaseError } from '../util/missingCaseError.std.ts';
+import { getNotifyWhileMutedForConversation } from '../util/notifyWhileMuted.preload.ts';
 import { normalizeGroupCallTimestamp } from '../util/ringrtc/normalizeGroupCallTimestamp.std.ts';
 import { requestCameraPermissions } from '../util/callingPermissions.dom.ts';
 import {
@@ -121,6 +123,8 @@ import {
   REQUESTED_SCREEN_SHARE_WIDTH,
   REQUESTED_SCREEN_SHARE_HEIGHT,
   REQUESTED_SCREEN_SHARE_FRAMERATE,
+  SVC_DEFAULT_MODE,
+  SVC_DEFAULT_MODE_FOR_SCREENSHARE,
 } from '../calling/constants.std.ts';
 import { callingMessageToProto } from '../util/callingMessageToProto.node.ts';
 import { requestMicrophonePermissions } from '../util/requestMicrophonePermissions.dom.ts';
@@ -201,10 +205,10 @@ const {
   cleanExpiredGroupCallRingCancellations,
 } = DataWriter;
 
-const RINGRTC_HTTP_METHOD_TO_OUR_HTTP_METHOD: Map<
+const RINGRTC_HTTP_METHOD_TO_OUR_HTTP_METHOD = new Map<
   HttpMethod,
   'GET' | 'PUT' | 'POST' | 'DELETE'
-> = new Map([
+>([
   [HttpMethod.Get, 'GET'],
   [HttpMethod.Put, 'PUT'],
   [HttpMethod.Post, 'POST'],
@@ -257,7 +261,7 @@ type CallingReduxInterface = Pick<
   | 'setMutedBy'
   | 'onObservedRemoteMute'
 > & {
-  areAnyCallsActiveOrRinging(): boolean;
+  areAnyCallsActiveOrRinging: () => boolean;
 };
 
 export type SetPresentingOptionsType = Readonly<{
@@ -341,7 +345,7 @@ function maybeShowCallQualitySurvey(
   const lastFailureSurveyTime =
     itemStorage.get('lastCallQualityFailureSurveyTime') ?? null;
   const cqsTestMode = itemStorage.get('cqsTestMode') ?? false;
-  const ourE164 = itemStorage.user.getNumber();
+  const ourE164 = itemStorage.user.getOptionalNumber();
 
   if (
     !shouldShowCallQualitySurvey({
@@ -486,12 +490,14 @@ async function ensureSystemPermissions({
   hasLocalAudio: boolean;
 }): Promise<void> {
   if (hasLocalAudio) {
+    // oxlint-disable-next-line typescript/await-thenable
     await window.reduxActions.globalModals.ensureSystemMediaPermissions(
       'microphone',
       'call'
     );
   }
   if (hasLocalVideo) {
+    // oxlint-disable-next-line typescript/await-thenable
     await window.reduxActions.globalModals.ensureSystemMediaPermissions(
       'camera',
       'call'
@@ -568,7 +574,7 @@ export type SetLocalPreviewContainerType = {
   sizeCallback: SizeCallbackType | undefined;
 };
 
-export class CallingClass {
+class CallingClass {
   readonly #videoCapturer: GumVideoCapturer;
   readonly videoRenderer: CanvasVideoRenderer;
 
@@ -590,13 +596,13 @@ export class CallingClass {
   #deviceReselectionTimer?: NodeJS.Timeout;
   #callsLookup: { [key: string]: Call | GroupCall };
 
-  #cameraEnabled: boolean = false;
+  #cameraEnabled = false;
 
-  #registeredAssets: Map<string, boolean> = new Map();
+  readonly #registeredAssets = new Map<string, boolean>();
 
   // Send our profile key to other participants in call link calls to ensure they
   // can see our profile info. Only send once per aci until the next app start.
-  #sendProfileKeysForAdhocCallCache: Set<AciString>;
+  readonly #sendProfileKeysForAdhocCallCache: Set<AciString>;
 
   constructor() {
     this.#videoCapturer = new GumVideoCapturer();
@@ -628,14 +634,10 @@ export class CallingClass {
     RingRTC.handleRejectedIncomingCallRequest =
       this.#handleRejectedIncomingCallRequest.bind(this);
     RingRTC.handleLogMessage = this.#handleLogMessage.bind(this);
-    // @ts-expect-error needs ringrtc update
     RingRTC.handleSendHttpRequest = this.#handleSendHttpRequest.bind(this);
-    // @ts-expect-error needs ringrtc update
     RingRTC.handleSendCallMessage = this.#handleSendCallMessage.bind(this);
-    // @ts-expect-error needs ringrtc update
     RingRTC.handleSendCallMessageToGroup =
       this.#handleSendCallMessageToGroup.bind(this);
-    // @ts-expect-error needs ringrtc update
     RingRTC.handleGroupCallRingUpdate =
       this.#handleGroupCallRingUpdate.bind(this);
 
@@ -867,10 +869,8 @@ export class CallingClass {
     );
 
     const rootKey = CallLinkRootKey.generate();
-    // @ts-expect-error needs ringrtc update
     const rootKeyBytes: Uint8Array<ArrayBuffer> = rootKey.bytes;
     const roomId = rootKey.deriveRoomId();
-    // @ts-expect-error needs ringrtc update
     const roomIdBytes: Uint8Array<ArrayBuffer> = roomId;
     const roomIdHex = Bytes.toHex(roomIdBytes);
     const logId = `createCallLink(${roomIdHex})`;
@@ -878,7 +878,6 @@ export class CallingClass {
     log.info(`${logId}: Creating call link`);
 
     const adminKey = CallLinkRootKey.generateAdminPassKey();
-    // @ts-expect-error needs ringrtc update
     const adminKeyBytes: Uint8Array<ArrayBuffer> = adminKey;
 
     const context =
@@ -925,7 +924,7 @@ export class CallingClass {
 
     log.info(`${logId}: success`);
     const state = callLinkStateFromRingRTC(result.value);
-    const maybeUpdatedRootKey = result.value.rootKey.toString();
+    const maybeUpdatedRootKey = result.value.rootKey.toUnredactedString();
 
     const callLink: CallLinkType = {
       roomId: roomIdHex,
@@ -1260,6 +1259,31 @@ export class CallingClass {
     return call instanceof GroupCall ? call : undefined;
   }
 
+  public getActiveCallIds(): Set<string> {
+    const callIds = new Set<string>();
+
+    for (const call of Object.values(this.#callsLookup)) {
+      if (call instanceof Call) {
+        callIds.add(call.callId.toString());
+      } else if (call instanceof GroupCall) {
+        const callId = call.getCallId();
+        if (callId != null) {
+          callIds.add(callId.toString());
+        }
+      } else {
+        throw missingCaseError(call);
+      }
+    }
+    return callIds;
+  }
+
+  public isCallActive(conversationId: string): boolean {
+    return (
+      this.#getDirectCall(conversationId) != null ||
+      this.#getGroupCall(conversationId) != null
+    );
+  }
+
   #getGroupCallMembers(conversationId: string) {
     return getMembershipList(conversationId).map(
       member =>
@@ -1437,12 +1461,24 @@ export class CallingClass {
     let isRequestingMembershipProof = false;
     const config = this.#getRemoteAndOverrideConfigValues();
 
+    const svcConfig: GroupCallSvcConfig | undefined =
+      config.isGroupSvcEnabled === true
+        ? {
+            mode: config.groupSvcMode ?? SVC_DEFAULT_MODE,
+            modeForScreenshare:
+              config.groupSvcModeForScreenshare ??
+              SVC_DEFAULT_MODE_FOR_SCREENSHARE,
+            maxBitrateBps: config.groupMaxBitrate,
+          }
+        : undefined;
+
     const outerGroupCall = RingRTC.getGroupCall(
       groupIdBuffer,
       this.sfuUrl,
       new Uint8Array(),
       AUDIO_LEVEL_INTERVAL_MS,
       config.dredDuration,
+      svcConfig,
       {
         ...this.#getGroupCallObserver(conversationId, CallMode.Group),
         async requestMembershipProof(groupCall) {
@@ -1516,6 +1552,17 @@ export class CallingClass {
     }
     const config = this.#getRemoteAndOverrideConfigValues();
 
+    const svcConfig: GroupCallSvcConfig | undefined =
+      config.isGroupSvcEnabled === true
+        ? {
+            mode: config.groupSvcMode ?? SVC_DEFAULT_MODE,
+            modeForScreenshare:
+              config.groupSvcModeForScreenshare ??
+              SVC_DEFAULT_MODE_FOR_SCREENSHARE,
+            maxBitrateBps: config.groupMaxBitrate,
+          }
+        : undefined;
+
     const outerGroupCall = RingRTC.getCallLinkCall(
       this.sfuUrl,
       endorsementsPublicKey,
@@ -1525,6 +1572,7 @@ export class CallingClass {
       new Uint8Array(),
       AUDIO_LEVEL_INTERVAL_MS,
       config.dredDuration,
+      svcConfig,
       this.#getGroupCallObserver(roomId, CallMode.Adhoc)
     );
 
@@ -1893,7 +1941,6 @@ export class CallingClass {
       let aci: AciString | null = null;
 
       if (device.userId) {
-        // @ts-expect-error needs ringrtc update
         const userIdBytes: Uint8Array<ArrayBuffer> = device.userId;
         aci = this.#formatUserId(userIdBytes);
       }
@@ -2184,7 +2231,6 @@ export class CallingClass {
     let creatorAci: string | undefined;
 
     if (peekInfo.creator) {
-      // @ts-expect-error needs ringrtc update
       const creatorBytes: Uint8Array<ArrayBuffer> = peekInfo.creator;
       creatorAci = bytesToUuid(creatorBytes);
     }
@@ -2192,7 +2238,6 @@ export class CallingClass {
     return {
       acis: peekInfo.devices.map(peekDeviceInfo => {
         if (peekDeviceInfo.userId) {
-          // @ts-expect-error needs ringrtc update
           const userIdBytes: Uint8Array<ArrayBuffer> = peekDeviceInfo.userId;
           const uuid = this.#formatUserId(userIdBytes);
           if (uuid) {
@@ -2210,7 +2255,6 @@ export class CallingClass {
       }),
       pendingAcis: compact(
         peekInfo.pendingUsers.map(userId => {
-          // @ts-expect-error needs ringrtc update;
           const userIdBytes: Uint8Array<ArrayBuffer> = userId;
           return this.#formatUserId(userIdBytes);
         })
@@ -2259,7 +2303,6 @@ export class CallingClass {
         ? this.formatGroupCallPeekInfoForRedux(peekInfo)
         : undefined,
       remoteParticipants: remoteDeviceStates.map(remoteDeviceState => {
-        // @ts-expect-error needs ringrtc update
         const userIdBytes: Uint8Array<ArrayBuffer> = remoteDeviceState.userId;
         let aci = bytesToUuid(userIdBytes);
         if (!aci) {
@@ -2601,6 +2644,7 @@ export class CallingClass {
 
     if (enabled) {
       // Make sure we have access to camera
+      // oxlint-disable-next-line typescript/await-thenable
       await window.reduxActions.globalModals.ensureSystemMediaPermissions(
         'camera',
         'call'
@@ -2735,13 +2779,12 @@ export class CallingClass {
         absolutePath = result.absolutePath;
       }
 
-      notificationService.notify({
+      notificationService.rawNotify({
         conversationId,
-        iconPath: absolutePath,
+        iconAbsolutePath: absolutePath ?? null,
         iconUrl: url,
-        message: i18n('icu:calling__presenting--notification-body'),
+        body: i18n('icu:calling__presenting--notification-body'),
         type: NotificationType.IsPresenting,
-        sentAt: 0,
         silent: true,
         title: i18n('icu:calling__presenting--notification-title'),
       });
@@ -2806,15 +2849,12 @@ export class CallingClass {
 
       const { url, absolutePath } = await conversation.getAvatarOrIdenticon();
 
-      notificationService.notify({
+      notificationService.rawNotify({
         conversationId,
-        iconPath: absolutePath,
+        iconAbsolutePath: absolutePath ?? null,
         iconUrl: url,
-        message: i18n(
-          'icu:calling__presenting--reconnecting--notification-body'
-        ),
+        body: i18n('icu:calling__presenting--reconnecting--notification-body'),
         type: NotificationType.IsPresenting,
-        sentAt: 0,
         silent: true,
         title: i18n(
           'icu:calling__presenting--reconnecting--notification-title'
@@ -3056,6 +3096,7 @@ export class CallingClass {
   }
 
   async enableLocalCamera(mode: CallMode): Promise<void> {
+    // oxlint-disable-next-line typescript/await-thenable
     await window.reduxActions.globalModals.ensureSystemMediaPermissions(
       'camera',
       'call'
@@ -3180,24 +3221,32 @@ export class CallingClass {
         Proto.CallMessage.Offer.Type.OFFER_VIDEO_CALL;
 
       const peerId = getPeerIdFromConversation(conversation.attributes);
-      const callDetails = getCallDetailsFromEndedDirectCall(
-        callId.toString(),
+      const eventTimestamp = envelope.timestamp;
+      const callDetails = getCallDetailsFromEndedDirectCall({
+        callId,
         peerId,
-        remoteUserId, // Incoming call
+        ringerId: remoteUserId, // Incoming call
         wasVideoCall,
-        envelope.timestamp
-      );
+        eventTimestamp,
+      });
       const localCallEvent = LocalCallEvent.Missed;
-      const callEvent = getCallEventDetails(
+      const callEvent = getCallEventDetails({
         callDetails,
-        localCallEvent,
-        'CallingClass.handleCallingMessage'
-      );
-      await updateCallHistoryFromLocalEvent(
+        event: localCallEvent,
+        eventSource: 'CallingClass.handleCallingMessage',
+        eventTimestamp,
+      });
+      const {
+        receivedAtCounter,
+        receivedAtDate: receivedAtMS,
+        serverGuid,
+      } = envelope;
+      await updateCallHistoryFromLocalEvent({
         callEvent,
-        envelope.receivedAtCounter,
-        envelope.receivedAtDate
-      );
+        receivedAtCounter,
+        receivedAtMS,
+        serverGuid,
+      });
 
       return;
     }
@@ -3398,6 +3447,11 @@ export class CallingClass {
       return;
     }
 
+    if (!conversation.getAccepted({ ignoreEmptyConvo: true })) {
+      log.warn(`${logId}: conversation has not been accepted`);
+      return;
+    }
+
     const ourAci = itemStorage.user.getCheckedAci();
 
     if (conversation.get('left') || !conversation.hasMember(ourAci)) {
@@ -3432,6 +3486,13 @@ export class CallingClass {
         RingRTC.cancelGroupRing(groupIdBytes, ringId, null);
       } else if (this.#areAnyCallsActiveOrRinging()) {
         RingRTC.cancelGroupRing(groupIdBytes, ringId, RingCancelReason.Busy);
+      } else if (
+        conversation.isMuted() &&
+        !getNotifyWhileMutedForConversation(conversation.attributes).calls
+      ) {
+        log.info(
+          `${logId}: not notifying for calls while muted. Ignoring ring request`
+        );
       } else if (getIncomingCallNotification()) {
         shouldRing = true;
       } else {
@@ -3461,9 +3522,14 @@ export class CallingClass {
     const localEventFromRing = getLocalCallEventFromRingUpdate(update);
     if (localEventFromRing != null) {
       const callId = getCallIdFromRing(ringId);
-      const callDetails = getCallDetailsFromGroupCallMeta(groupId, {
-        callId,
-        ringerId: ringerAci,
+      const eventTimestamp = Date.now();
+      const callDetails = getCallDetailsFromGroupCallMeta({
+        peerId: groupId,
+        groupCallMeta: {
+          callId,
+          ringerId: ringerAci,
+        },
+        eventTimestamp,
       });
       let localEventForCall;
       if (localEventFromRing === LocalCallEvent.Missed) {
@@ -3473,12 +3539,15 @@ export class CallingClass {
           ? LocalCallEvent.Ringing
           : LocalCallEvent.Started;
       }
-      const callEvent = getCallEventDetails(
+      const callEvent = getCallEventDetails({
         callDetails,
-        localEventForCall,
-        'CallingClass.handleGroupCallRingUpdate'
-      );
-      await updateCallHistoryFromLocalEvent(callEvent, null, null);
+        event: localEventForCall,
+        eventSource: 'CallingClass.handleGroupCallRingUpdate',
+        eventTimestamp,
+      });
+      await updateCallHistoryFromLocalEvent({
+        callEvent,
+      });
     }
   }
 
@@ -3557,6 +3626,31 @@ export class CallingClass {
       log.warn(`${logId}: ${conversation.idForLogging()} is blocked`);
       return false;
     }
+
+    if (
+      conversation.isMuted() &&
+      !getNotifyWhileMutedForConversation(conversation.attributes).calls
+    ) {
+      log.info(`${logId}: not notifying for calls while muted, ignoring`);
+
+      const eventTimestamp = Date.now();
+      const callEvent = getCallEventDetails({
+        callDetails: getCallDetailsFromDirectCall({
+          peerId: getPeerIdFromConversation(conversation.attributes),
+          call,
+          eventTimestamp,
+        }),
+        event: LocalCallEvent.Missed,
+        eventSource: 'CallingClass.handleIncomingCall',
+        eventTimestamp,
+      });
+      await updateCallHistoryFromLocalEvent({
+        callEvent,
+      });
+
+      return false;
+    }
+
     try {
       // The peer must be 'trusted' before accepting a call from them.
       // This is mostly the safety number check, unverified meaning that they were
@@ -3567,13 +3661,21 @@ export class CallingClass {
 
         const localCallEvent = LocalCallEvent.Missed;
         const peerId = getPeerIdFromConversation(conversation.attributes);
-        const callDetails = getCallDetailsFromDirectCall(peerId, call);
-        const callEvent = getCallEventDetails(
+        const eventTimestamp = Date.now();
+        const callDetails = getCallDetailsFromDirectCall({
+          peerId,
+          call,
+          eventTimestamp,
+        });
+        const callEvent = getCallEventDetails({
           callDetails,
-          localCallEvent,
-          'CallingClass.handleIncomingCall'
-        );
-        await updateCallHistoryFromLocalEvent(callEvent, null, null);
+          event: localCallEvent,
+          eventSource: 'CallingClass.handleIncomingCall',
+          eventTimestamp,
+        });
+        await updateCallHistoryFromLocalEvent({
+          callEvent,
+        });
 
         return false;
       }
@@ -3602,13 +3704,13 @@ export class CallingClass {
   }
 
   async #handleRejectedIncomingCallRequest(
-    callIdValue: CallId,
+    callId: CallId,
     remoteUserId: UserId,
     callRejectReason: CallRejectReason,
     ageInSeconds: number,
     wasVideoCall: boolean,
     receivedAtCounter: number | undefined,
-    receivedAtMS: number | undefined = undefined
+    receivedAtMS?: number
   ) {
     const conversation = window.ConversationController.get(remoteUserId);
     if (!conversation) {
@@ -3622,21 +3724,11 @@ export class CallingClass {
     });
     log.info(logId);
 
-    if (callRejectReason === CallRejectReason.ReceivedOfferWhileActive) {
-      // This is a special case where we won't update our local call, because we have
-      // an ongoing active call. The ended call would stomp on the active call.
-      log.info(
-        `${logId}: Got offer while active for conversation ${conversation?.idForLogging()}`
-      );
-      return;
-    }
-
     // Attempt to translate the rejection reason to its CallEndedReason
     // counterpart.
     const callEndedReason =
       this.#convertRingRtcCallRejectReason(callRejectReason);
 
-    const callId = callIdValue.toString();
     const peerId = getPeerIdFromConversation(conversation.attributes);
 
     // This is extra defensive, just in case RingRTC passes us a bad value. (It probably
@@ -3645,39 +3737,48 @@ export class CallingClass {
       isNormalNumber(ageInSeconds) && ageInSeconds >= 0
         ? ageInSeconds * durations.SECOND
         : 0;
-    const timestamp = Date.now() - ageInMilliseconds;
+    const eventTimestamp = Date.now() - ageInMilliseconds;
 
-    const callDetails = getCallDetailsFromEndedDirectCall(
+    const callDetails = getCallDetailsFromEndedDirectCall({
       callId,
       peerId,
-      remoteUserId,
+      ringerId: remoteUserId,
       wasVideoCall,
-      timestamp
-    );
-
-    // We classify all of the call rejection events as 'Missed'.
-    const callEvent = getCallEventDetails(
-      callDetails,
-      LocalCallEvent.Missed,
-      'CallingClass.handleRejectedIncomingCallRequest'
-    );
-
-    if (!this.#reduxInterface) {
-      log.error(`${logId}: Unable to update redux for call`);
-    }
-
-    this.#reduxInterface?.callStateChange({
-      acceptedTime: null,
-      callEndedReason,
-      callState: CallState.Ended,
-      conversationId: conversation.id,
+      eventTimestamp,
     });
 
-    await updateCallHistoryFromLocalEvent(
+    // We classify all of the call rejection events as 'Missed'.
+    const callEvent = getCallEventDetails({
+      callDetails,
+      event: LocalCallEvent.Missed,
+      eventSource: 'CallingClass.handleRejectedIncomingCallRequest',
+      eventTimestamp,
+    });
+
+    if (callRejectReason === CallRejectReason.ReceivedOfferWhileActive) {
+      // This is a special case where we won't update our local call, because we have
+      // an ongoing active call. The ended call would stomp on the active call.
+      log.info(
+        `${logId}: Got offer while active for conversation ${conversation?.idForLogging()}`
+      );
+    } else {
+      if (!this.#reduxInterface) {
+        log.error(`${logId}: Unable to update redux for call`);
+      }
+
+      this.#reduxInterface?.callStateChange({
+        acceptedTime: null,
+        callEndedReason,
+        callState: CallState.Ended,
+        conversationId: conversation.id,
+      });
+    }
+
+    await updateCallHistoryFromLocalEvent({
       callEvent,
-      receivedAtCounter ?? null,
-      receivedAtMS ?? null
-    );
+      receivedAtCounter,
+      receivedAtMS,
+    });
   }
 
   #attachToCall(conversation: ConversationModel, call: Call): void {
@@ -3700,13 +3801,13 @@ export class CallingClass {
     // oxlint-disable-next-line no-param-reassign
     call.handleStateChanged = async () => {
       if (call.state === CallState.Accepted) {
-        acceptedTime = acceptedTime ?? Date.now();
+        acceptedTime ??= Date.now();
 
         // Start rendering received video frames.
         this.videoRenderer.enable(call);
         if (this.#cameraEnabled) {
           // Start sending video from the camera (if not already).
-          await this.enableCaptureAndSend(call);
+          drop(this.enableCaptureAndSend(call));
         }
       }
       if (call.state === CallState.Ended) {
@@ -3730,13 +3831,21 @@ export class CallingClass {
       );
       if (localCallEvent != null) {
         const peerId = getPeerIdFromConversation(conversation.attributes);
-        const callDetails = getCallDetailsFromDirectCall(peerId, call);
-        const callEvent = getCallEventDetails(
+        const eventTimestamp = Date.now();
+        const callDetails = getCallDetailsFromDirectCall({
+          peerId,
+          call,
+          eventTimestamp,
+        });
+        const callEvent = getCallEventDetails({
           callDetails,
-          localCallEvent,
-          'call.handleStateChanged'
-        );
-        await updateCallHistoryFromLocalEvent(callEvent, null, null);
+          event: localCallEvent,
+          eventSource: 'call.handleStateChanged',
+          eventTimestamp,
+        });
+        await updateCallHistoryFromLocalEvent({
+          callEvent,
+        });
       }
 
       if (
@@ -3777,7 +3886,7 @@ export class CallingClass {
     call.handleRemoteSharingScreen = () => {
       reduxInterface.remoteSharingScreenChange({
         conversationId,
-        isSharingScreen: Boolean(call.remoteSharingScreen),
+        isSharingScreen: call.remoteSharingScreen,
       });
     };
 
@@ -3883,10 +3992,14 @@ export class CallingClass {
 
   #getRemoteAndOverrideConfigValues(): {
     dredDuration: number | undefined;
-    isDirectVp9Enabled: boolean | undefined;
+    enableVp9Encode: boolean | undefined;
+    enableVp9Decode: boolean | undefined;
     directMaxBitrate: number | undefined;
-    isGroupVp9Enabled: boolean | undefined;
     groupMaxBitrate: number | undefined;
+    isGroupSvcEnabled: boolean | undefined;
+    groupSvcMode: string | undefined;
+    groupSvcModeForScreenshare: string | undefined;
+    callStatsIntervalSecs: number | undefined;
   } {
     function dredDuration(version: string): number | undefined {
       const override = itemStorage.get('dredDuration');
@@ -3915,6 +4028,34 @@ export class CallingClass {
       return undefined;
     }
 
+    function isGroupSvcEnabled(): boolean {
+      return (
+        itemStorage.get('isGroupSvcEnabled') ??
+        RemoteConfig.isEnabled('desktop.calling.enableSvc')
+      );
+    }
+
+    function groupSvcMode(): string | undefined {
+      return (
+        itemStorage.get('groupSvcMode') ??
+        RemoteConfig.getValue('desktop.calling.svcMode')
+      );
+    }
+
+    function groupSvcModeForScreenshare(): string | undefined {
+      return (
+        itemStorage.get('groupSvcModeForScreenshare') ??
+        RemoteConfig.getValue('desktop.calling.svcModeForScreenshare')
+      );
+    }
+
+    function groupSvcMaxBitrateBps(): number | undefined {
+      return (
+        itemStorage.get('groupMaxBitrate') ??
+        tryParseInt(RemoteConfig.getValue('desktop.calling.svcMaxBitrateBps'))
+      );
+    }
+
     function tryParseInt(v: string | undefined): number | undefined {
       try {
         return parseIntOrThrow(v, 'invalid');
@@ -3927,10 +4068,14 @@ export class CallingClass {
 
     return {
       dredDuration: dredDuration(version),
-      isDirectVp9Enabled: itemStorage.get('isDirectVp9Enabled'),
+      enableVp9Encode: itemStorage.get('enableVp9Encode'),
+      enableVp9Decode: itemStorage.get('enableVp9Decode'),
       directMaxBitrate: itemStorage.get('directMaxBitrate'),
-      isGroupVp9Enabled: itemStorage.get('isGroupVp9Enabled'),
-      groupMaxBitrate: itemStorage.get('directMaxBitrate'),
+      groupMaxBitrate: groupSvcMaxBitrateBps(),
+      isGroupSvcEnabled: isGroupSvcEnabled(),
+      groupSvcMode: groupSvcMode(),
+      groupSvcModeForScreenshare: groupSvcModeForScreenshare(),
+      callStatsIntervalSecs: itemStorage.get('callStatsIntervalSecs'),
     };
   }
 
@@ -4057,6 +4202,9 @@ export class CallingClass {
       dataMode: DataMode.Normal,
       audioLevelsIntervalMillis: AUDIO_LEVEL_INTERVAL_MS,
       dredDuration: config.dredDuration,
+      enableVp9Encode: config.enableVp9Encode,
+      enableVp9Decode: config.enableVp9Decode,
+      callStatsIntervalSecs: config.callStatsIntervalSecs,
     };
 
     log.info('CallingClass.handleStartCall(): Proceeding');
@@ -4101,12 +4249,18 @@ export class CallingClass {
         return;
       }
 
-      const callDetails = getCallDetailsForAdhocCall(roomId, callId);
-      const callEvent = getCallEventDetails(
+      const eventTimestamp = Date.now();
+      const callDetails = getCallDetailsForAdhocCall({
+        peerId: roomId,
+        callId,
+        eventTimestamp,
+      });
+      const callEvent = getCallEventDetails({
         callDetails,
-        localCallEvent,
-        'CallingClass.updateCallHistoryForAdhocCall'
-      );
+        event: localCallEvent,
+        eventSource: 'CallingClass.updateCallHistoryForAdhocCall',
+        eventTimestamp: callDetails.timestamp,
+      });
       await updateAdhocCallHistory(callEvent);
     } catch (error) {
       log.error(
@@ -4143,16 +4297,21 @@ export class CallingClass {
       );
       const peerId = getPeerIdFromConversation(conversation.attributes);
 
-      const callDetails = getCallDetailsFromGroupCallMeta(
+      const eventTimestamp = Date.now();
+      const callDetails = getCallDetailsFromGroupCallMeta({
         peerId,
-        groupCallMeta
-      );
-      const callEvent = getCallEventDetails(
+        groupCallMeta,
+        eventTimestamp,
+      });
+      const callEvent = getCallEventDetails({
         callDetails,
-        localCallEvent,
-        'CallingClass.updateCallHistoryForGroupCallOnLocalChanged'
-      );
-      await updateCallHistoryFromLocalEvent(callEvent, null, null);
+        event: localCallEvent,
+        eventSource: 'CallingClass.updateCallHistoryForGroupCallOnLocalChanged',
+        eventTimestamp,
+      });
+      await updateCallHistoryFromLocalEvent({
+        callEvent,
+      });
     } catch (error) {
       log.error(
         'CallingClass.updateCallHistoryForGroupCallOnLocalChanged: Error updating state',
@@ -4184,12 +4343,14 @@ export class CallingClass {
       return;
     }
 
-    const prevMessageId = await DataReader.getCallHistoryMessageByCallId({
-      conversationId: conversation.id,
-      callId: groupCallMeta.callId,
-    });
+    const peerId = getPeerIdFromConversation(conversation.attributes);
 
-    const isNewCall = prevMessageId == null;
+    const callHistory = await DataReader.getCallHistory(
+      groupCallMeta.callId,
+      peerId
+    );
+
+    const isNewCall = callHistory == null;
 
     if (isNewCall) {
       const localCallEvent = getLocalCallEventFromJoinState(
@@ -4197,17 +4358,21 @@ export class CallingClass {
         groupCallMeta
       );
       if (localCallEvent != null) {
-        const peerId = getPeerIdFromConversation(conversation.attributes);
-        const callDetails = getCallDetailsFromGroupCallMeta(
+        const eventTimestamp = Date.now();
+        const callDetails = getCallDetailsFromGroupCallMeta({
           peerId,
-          groupCallMeta
-        );
-        const callEvent = getCallEventDetails(
+          groupCallMeta,
+          eventTimestamp,
+        });
+        const callEvent = getCallEventDetails({
           callDetails,
-          localCallEvent,
-          'CallingClass.updateCallHistoryForGroupCallOnPeek'
-        );
-        await updateCallHistoryFromLocalEvent(callEvent, null, null);
+          event: localCallEvent,
+          eventSource: 'CallingClass.updateCallHistoryForGroupCallOnPeek',
+          eventTimestamp,
+        });
+        await updateCallHistoryFromLocalEvent({
+          callEvent,
+        });
       }
     }
 
@@ -4262,13 +4427,12 @@ export class CallingClass {
       }
     }
 
-    notificationService.notify({
+    notificationService.rawNotify({
       conversationId: conversation.id,
-      iconPath: absolutePath,
-      iconUrl: url,
-      message: notificationMessage,
+      iconAbsolutePath: absolutePath ?? null,
+      iconUrl: url ?? null,
+      body: notificationMessage,
       type: NotificationType.IncomingGroupCall,
-      sentAt: 0,
       silent: false,
       title: notificationTitle,
     });
@@ -4279,11 +4443,7 @@ export class CallingClass {
     title: string,
     isVideoCall: boolean
   ): Promise<void> {
-    const shouldNotify =
-      !window.SignalContext.activeWindowService.isActive() &&
-      itemStorage.get('call-system-notification', true);
-
-    if (!shouldNotify) {
+    if (window.SignalContext.activeWindowService.isActive()) {
       return;
     }
 
@@ -4322,15 +4482,14 @@ export class CallingClass {
       }
     }
 
-    notificationService.notify({
+    notificationService.rawNotify({
       conversationId,
       title: notificationTitle,
-      iconPath: absolutePath,
-      iconUrl: url,
-      message: isVideoCall
+      iconAbsolutePath: absolutePath ?? null,
+      iconUrl: url ?? null,
+      body: isVideoCall
         ? i18n('icu:incomingVideoCall')
         : i18n('icu:incomingAudioCall'),
-      sentAt: 0,
       // The ringtone plays so we don't need sound for the notification
       silent: true,
       type: NotificationType.IncomingCall,

@@ -71,7 +71,7 @@ export async function createProxyAgent(proxyUrl: string): Promise<ProxyAgent> {
 
     const duration = Date.now() - start;
     const logLine =
-      `createProxyAgent.lookup(${host}): connected to ` +
+      `createProxyAgent.lookup: connected to ` +
       `IPv${address.family} addr after ${duration}ms ` +
       `(attempts v4=${v4Attempts} v6=${v6Attempts})`;
 
@@ -115,13 +115,7 @@ export async function createProxyAgent(proxyUrl: string): Promise<ProxyAgent> {
     lookup:
       port !== undefined
         ? (host, opts, callback) =>
-            drop(
-              happyLookupWithCallback(
-                host,
-                opts,
-                callback as CoercedCallbackType
-              )
-            )
+            drop(happyLookupWithCallback(host, opts, callback))
         : undefined,
   } satisfies Pick<TcpSocketConnectOpts, 'lookup'>);
 }

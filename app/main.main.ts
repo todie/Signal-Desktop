@@ -29,7 +29,11 @@ import {
   safeStorage,
   protocol as electronProtocol,
 } from 'electron';
-import type { MenuItemConstructorOptions, Settings } from 'electron';
+import type {
+  MenuItemConstructorOptions,
+  Settings,
+  BrowserWindowConstructorOptions,
+} from 'electron';
 import { z } from 'zod';
 
 import { packageJson } from '../ts/util/packageJson.main.ts';
@@ -54,14 +58,12 @@ import { explodePromise } from '../ts/util/explodePromise.std.ts';
 import './startup_config.main.ts';
 
 import type { RendererConfigType } from '../ts/types/RendererConfig.std.ts';
-import {
-  directoryConfigSchema,
-  rendererConfigSchema,
-} from '../ts/types/RendererConfig.std.ts';
+import { rendererConfigSchema } from '../ts/types/RendererConfig.std.ts';
 import config from './config.main.ts';
 import {
   Environment,
   getEnvironment,
+  isMockEnvironment,
   isTestEnvironment,
 } from '../ts/environment.std.ts';
 
@@ -84,6 +86,8 @@ import {
 import { SystemTraySettingCache } from './SystemTraySettingCache.node.ts';
 import { OptionalResourceService } from './OptionalResourceService.main.ts';
 import { EmojiService } from './EmojiService.main.ts';
+import { AssetService } from './AssetService.main.ts';
+import * as DevelopmentService from './DevelopmentService.main.ts';
 import {
   SystemTraySetting,
   shouldMinimizeToSystemTray,
@@ -113,6 +117,8 @@ import { ChallengeMainHandler } from '../ts/main/challengeMain.main.ts';
 import { NativeThemeNotifier } from '../ts/main/NativeThemeNotifier.main.ts';
 import { PowerChannel } from '../ts/main/powerChannel.main.ts';
 import { SettingsChannel } from '../ts/main/settingsChannel.main.ts';
+import { PDFWindowPropsSchema } from '../ts/windows/pdf/types.std.ts';
+import '../ts/main/clipboardMain.main.ts';
 import { maybeParseUrl, setUrlSearchParams } from '../ts/util/url.std.ts';
 import { getHeicConverter } from '../ts/workers/heicConverterMain.main.ts';
 
@@ -134,7 +140,9 @@ import { getAppErrorIcon } from '../ts/util/getAppErrorIcon.node.ts';
 import { promptOSAuth } from '../ts/util/os/promptOSAuthMain.main.ts';
 import { appRelaunch } from '../ts/util/relaunch.main.ts';
 import { getAppRootDir } from '../ts/util/appRootDir.main.ts';
+import { trackHeapSize } from '../ts/util/oomNotifier.node.ts';
 import { sendDummyKeystroke } from './WindowsNotifications.main.ts';
+import { maybeMigrateSafeStorageBackend } from '../ts/util/linuxPasswordStoreMigration.main.ts';
 
 const { chmod, realpath, writeFile } = fsExtra;
 const { get, pick, isNumber, isBoolean, some, debounce, noop } = lodash;
@@ -248,53 +256,51 @@ function showWindow() {
   }
 }
 
-if (!process.mas) {
-  log.info('making app single instance');
-  const gotLock = app.requestSingleInstanceLock();
-  if (!gotLock) {
-    log.info('quitting; we are the second instance');
-    app.exit();
-  } else {
-    app.on('second-instance', (_e: Electron.Event, argv: Array<string>) => {
-      // Workaround to let AllowSetForegroundWindow succeed.
-      // See https://www.npmjs.com/package/@signalapp/windows-dummy-keystroke for a full explanation of why this is needed.
-      if (OS.isWindows()) {
-        sendDummyKeystroke();
+log.info('making app single instance');
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  log.info('quitting; we are the second instance');
+  app.exit();
+} else {
+  app.on('second-instance', (_e: Electron.Event, argv: Array<string>) => {
+    // Workaround to let AllowSetForegroundWindow succeed.
+    // See https://www.npmjs.com/package/@signalapp/windows-dummy-keystroke for a full explanation of why this is needed.
+    if (OS.isWindows()) {
+      sendDummyKeystroke();
+    }
+
+    // Someone tried to run a second instance, we should focus our window
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) {
+        mainWindow.restore();
       }
 
-      // Someone tried to run a second instance, we should focus our window
-      if (mainWindow) {
-        if (mainWindow.isMinimized()) {
-          mainWindow.restore();
-        }
+      showWindow();
+    }
 
-        showWindow();
+    const route = maybeGetIncomingSignalRoute(argv);
+    if (route != null) {
+      handleSignalRoute(route);
+    }
+    return true;
+  });
+
+  // This event is received in macOS packaged builds.
+  app.on('open-url', (event, incomingHref) => {
+    event.preventDefault();
+    const route = parseSignalRoute(incomingHref);
+
+    if (route != null) {
+      // When the app isn't open and you click a signal link to open the app, then
+      // this event will emit before mainWindow is ready. We save the value for later.
+      if (mainWindow == null || !mainWindow.webContents) {
+        macInitialOpenUrlRoute = route;
+        return;
       }
 
-      const route = maybeGetIncomingSignalRoute(argv);
-      if (route != null) {
-        handleSignalRoute(route);
-      }
-      return true;
-    });
-
-    // This event is received in macOS packaged builds.
-    app.on('open-url', (event, incomingHref) => {
-      event.preventDefault();
-      const route = parseSignalRoute(incomingHref);
-
-      if (route != null) {
-        // When the app isn't open and you click a signal link to open the app, then
-        // this event will emit before mainWindow is ready. We save the value for later.
-        if (mainWindow == null || !mainWindow.webContents) {
-          macInitialOpenUrlRoute = route;
-          return;
-        }
-
-        handleSignalRoute(route);
-      }
-    });
-  }
+      handleSignalRoute(route);
+    }
+  });
 }
 
 let sqlInitTimeStart = 0;
@@ -353,6 +359,8 @@ async function getResolvedThemeSetting(
   if (theme === 'system') {
     return nativeTheme.shouldUseDarkColors ? ThemeType.dark : ThemeType.light;
   }
+  // Set window theme from setting as early as possible
+  nativeTheme.themeSource = theme;
   return ThemeType[theme];
 }
 
@@ -361,23 +369,29 @@ type GetBackgroundColorOptionsType = GetThemeSettingOptionsType &
     signalColors?: boolean;
   }>;
 
+const AXO_COLOR_BRAND_LOGO = '#3b45fd';
+const AXO_COLOR_SURFACE_PRIMARY_LIGHT = '#fafafa';
+const AXO_COLOR_SURFACE_PRIMARY_DARK = '#191919';
+
 async function getBackgroundColor(
   options?: GetBackgroundColorOptionsType
 ): Promise<string> {
   const theme = await getResolvedThemeSetting(options);
 
   if (theme === 'light') {
-    return options?.signalColors ? '#3a76f0' : '#ffffff';
+    return options?.signalColors
+      ? AXO_COLOR_BRAND_LOGO
+      : AXO_COLOR_SURFACE_PRIMARY_LIGHT;
   }
 
   if (theme === 'dark') {
-    return '#121212';
+    return AXO_COLOR_SURFACE_PRIMARY_DARK;
   }
 
   throw missingCaseError(theme);
 }
 
-async function getLocaleOverrideSetting(): Promise<string | null> {
+function getLocaleOverrideSetting(): string | null {
   const value = ephemeralConfig.get('localeOverride');
   // oxlint-disable-next-line eqeqeq -- Checking for null explicitly
   if (typeof value === 'string' || value === null) {
@@ -485,19 +499,19 @@ type PrepareUrlOptions = {
   sourceName?: string;
 };
 
-async function prepareFileUrl(
+function prepareFileUrl(
   pathSegments: ReadonlyArray<string>,
   options: PrepareUrlOptions = {}
-): Promise<string> {
+): string {
   const filePath = join(...pathSegments);
-  const fileUrl = pathToFileURL(filePath) as URL;
+  const fileUrl = pathToFileURL(filePath);
   return prepareUrl(fileUrl, options);
 }
 
-async function prepareUrl(
+function prepareUrl(
   url: URL,
   { forCalling, forCamera, sourceName }: PrepareUrlOptions = {}
-): Promise<string> {
+): string {
   return setUrlSearchParams(url, { forCalling, forCamera, sourceName }).href;
 }
 
@@ -694,8 +708,7 @@ async function createWindow() {
     isTestEnvironment(getEnvironment()) ||
     systemTraySetting === SystemTraySetting.MinimizeToAndStartInSystemTray;
 
-  const shouldShowWindow =
-    !app.getLoginItemSettings().wasOpenedAsHidden && !startInTray;
+  const shouldShowWindow = !startInTray;
 
   const windowOptions: Electron.BrowserWindowConstructorOptions = {
     show: false,
@@ -763,6 +776,14 @@ async function createWindow() {
 
   // Create the browser window.
   mainWindow = new BrowserWindow(windowOptions);
+
+  mainWindow.webContents.on('preload-error', (_event, _preloadPath, error) => {
+    log.error(Errors.toLogFormat(error));
+    if (isTestEnvironment(getEnvironment())) {
+      app.quit();
+    }
+  });
+
   if (settingsChannel) {
     settingsChannel.setMainWindow(mainWindow);
   }
@@ -988,12 +1009,13 @@ async function createWindow() {
     }
   });
 
-  mainWindow.on('show', () => {
+  const onShow = () => {
     if (mainWindow) {
       mainWindow.webContents.send('activate');
       mainWindow.webContents.send('set-media-playback-disabled', false);
     }
-  });
+  };
+  mainWindow.on('show', onShow);
 
   mainWindow.webContents.on('devtools-reload-page', () => {
     mainWindow?.webContents.on('dom-ready', () => {
@@ -1013,7 +1035,13 @@ async function createWindow() {
 
     if (shouldShowWindow) {
       log.info('showing main window');
-      mainWindow.show();
+      if (isMockEnvironment() && process.env.SIGNAL_MOCK_TESTS_BACKGROUND) {
+        mainWindow.showInactive();
+        onShow();
+        mainWindow.webContents.send('set-window-focus', true);
+      } else {
+        mainWindow.show();
+      }
     }
   };
 
@@ -1032,8 +1060,8 @@ async function createWindow() {
   await safeLoadURL(
     mainWindow,
     getEnvironment() === Environment.Test
-      ? await prepareFileUrl([rootDir, 'test', 'index.html'])
-      : await prepareFileUrl([rootDir, 'background.html'])
+      ? prepareFileUrl([rootDir, 'test', 'index.html'])
+      : prepareFileUrl([rootDir, 'background.html'])
   );
 }
 
@@ -1113,6 +1141,67 @@ ipc.on('title-bar-double-click', () => {
     //   we add support for other operating systems.
     toggleMaximizedBrowserWindow(mainWindow);
   }
+});
+
+ipc.handle('pdf:generate', async (_event, data) => {
+  const props = PDFWindowPropsSchema.parse(data);
+
+  const options: BrowserWindowConstructorOptions = {
+    backgroundColor: '#ffffff',
+    show: false,
+    width: 612,
+    height: 792,
+    maximizable: false,
+    minimizable: false,
+    resizable: false,
+    webPreferences: {
+      ...defaultWebPrefs,
+      nodeIntegration: false,
+      nodeIntegrationInWorker: false,
+      sandbox: true,
+      contextIsolation: true,
+      preload: join(rootDir, 'bundles', 'preload', 'pdf.js'),
+    },
+  };
+
+  const pdfWindow = new BrowserWindow(options);
+
+  pdfWindow.webContents.ipc.on('pdf:getProps', async event => {
+    // oxlint-disable-next-line no-param-reassign
+    event.returnValue = props;
+  });
+
+  await handleCommonWindowEvents(pdfWindow);
+
+  const { promise, resolve, reject } =
+    Promise.withResolvers<Uint8Array<ArrayBuffer>>();
+
+  try {
+    pdfWindow.webContents.on('did-finish-load', async () => {
+      try {
+        const pdf = await pdfWindow.webContents.printToPDF({
+          margins: {
+            top: 0,
+            bottom: 0,
+            left: 0,
+            right: 0,
+          },
+          preferCSSPageSize: true,
+          printBackground: true,
+        });
+        pdfWindow.close();
+        resolve(pdf as Uint8Array<ArrayBuffer>);
+      } catch (error) {
+        reject(error);
+      }
+    });
+
+    await safeLoadURL(pdfWindow, prepareFileUrl([rootDir, 'pdf.html']));
+  } catch (error) {
+    reject(error);
+  }
+
+  return promise;
 });
 
 ipc.on('set-is-call-active', (_event, isCallActive) => {
@@ -1302,7 +1391,7 @@ async function showScreenShareWindow(sourceName: string | undefined) {
 
   await safeLoadURL(
     screenShareWindow,
-    await prepareFileUrl([rootDir, 'screenShare.html'], { sourceName })
+    prepareFileUrl([rootDir, 'screenShare.html'], { sourceName })
   );
 }
 
@@ -1347,14 +1436,14 @@ async function showAbout() {
     }
   });
 
-  await safeLoadURL(aboutWindow, await prepareFileUrl([rootDir, 'about.html']));
+  await safeLoadURL(aboutWindow, prepareFileUrl([rootDir, 'about.html']));
 }
 
 async function getIsLinked() {
   try {
-    const number = await sql.sqlRead('getItemById', 'number_id');
+    const aci = await sql.sqlRead('getItemById', 'uuid_id');
     const password = await sql.sqlRead('getItemById', 'password');
-    return Boolean(number && password);
+    return Boolean(aci && password);
   } catch (e) {
     return false;
   }
@@ -1585,7 +1674,7 @@ function showPermissionsPopupWindow(forCalling: boolean, forCamera: boolean) {
 
     await safeLoadURL(
       permissionsPopupWindow,
-      await prepareFileUrl([rootDir, 'permissions_popup.html'], {
+      prepareFileUrl([rootDir, 'permissions_popup.html'], {
         forCalling,
         forCamera,
       })
@@ -1823,6 +1912,7 @@ async function initializeSQL(
 
     return {
       ok: false,
+      // oxlint-disable-next-line typescript/restrict-template-expressions
       error: new Error(`initializeSQL: Caught a non-error '${error}'`),
     };
   } finally {
@@ -1880,6 +1970,17 @@ const onDatabaseInitializationError = async (error: Error) => {
     defaultButtonId = copyErrorAndQuitButtonIndex;
   } else if (error instanceof SafeStorageBackendChangeError) {
     const { currentBackend, previousBackend } = error;
+
+    // Attempt automatic migration
+    if (await maybeMigrateSafeStorageBackend(previousBackend, currentBackend)) {
+      log.info(
+        `Performed auto migration of safeStorage backend from ${previousBackend} to ${currentBackend}. Restarting.`
+      );
+      app.relaunch();
+      app.exit(1);
+      return;
+    }
+
     const previousBackendFlag = getOwn(
       LINUX_PASSWORD_STORE_FLAGS,
       previousBackend
@@ -1930,7 +2031,7 @@ const onDatabaseInitializationError = async (error: Error) => {
   });
 
   if (buttonIndex === copyErrorAndQuitButtonIndex) {
-    clipboard.writeText(
+    await clipboard.writeText(
       `Database startup error:\n\n${redactAll(Errors.toLogFormat(error))}\n\n` +
         `App Version: ${app.getVersion()}\n` +
         `OS: ${os.platform()}`
@@ -2002,6 +2103,30 @@ function loadPreferredSystemLocales(): Array<string> {
   return app.getPreferredSystemLanguages();
 }
 
+function resolveTranslationsLocale() {
+  if (!resolvedTranslationsLocale) {
+    preferredSystemLocales = resolveCanonicalLocales(
+      loadPreferredSystemLocales()
+    );
+
+    localeOverride = getLocaleOverrideSetting();
+
+    const hourCyclePreference = getHourCyclePreference();
+    log.info(`app.ready: hour cycle preference: ${hourCyclePreference}`);
+
+    log.info('app.ready: preferred system locales:', preferredSystemLocales);
+    resolvedTranslationsLocale = loadLocale({
+      rootDir,
+      hourCyclePreference,
+      isPackaged: app.isPackaged,
+      localeDirectionTestingOverride,
+      localeOverride,
+      logger: log,
+      preferredSystemLocales,
+    });
+  }
+}
+
 async function getDefaultLoginItemSettings(): Promise<Settings> {
   if (!OS.isWindows()) {
     return {};
@@ -2029,13 +2154,23 @@ const featuresToDisable = `HardwareMediaKeyHandling,${app.commandLine.getSwitchV
 )}`;
 app.commandLine.appendSwitch('disable-features', featuresToDisable);
 
+resolveTranslationsLocale();
+app.commandLine.appendSwitch('lang', getResolvedMessagesLocale().name);
+
 // This has to run before the 'ready' event.
 electronProtocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'asset',
+    privileges: {
+      corsEnabled: true,
+    },
+  },
   {
     scheme: 'attachment',
     privileges: {
       standard: true,
       supportFetchAPI: true,
+      corsEnabled: true,
       stream: true,
     },
   },
@@ -2069,9 +2204,7 @@ app.on('ready', async () => {
   }
 
   installWebHandler({
-    enableHttp:
-      Boolean(process.env.SIGNAL_ENABLE_HTTP) ||
-      Boolean(process.env.REACT_DEVTOOLS),
+    enableHttp: Boolean(process.env.SIGNAL_ENABLE_HTTP),
     session: session.defaultSession,
   });
 
@@ -2081,28 +2214,15 @@ app.on('ready', async () => {
     join(userDataPath, 'optionalResources')
   );
   await EmojiService.create(resourceService);
+  AssetService.create(resourceService);
+  DevelopmentService.start({
+    isDevelopment: development && !app.isPackaged,
+  });
 
-  if (!resolvedTranslationsLocale) {
-    preferredSystemLocales = resolveCanonicalLocales(
-      loadPreferredSystemLocales()
-    );
+  // ERROR-level logging is sufficient for main process.
+  trackHeapSize();
 
-    localeOverride = await getLocaleOverrideSetting();
-
-    const hourCyclePreference = getHourCyclePreference();
-    log.info(`app.ready: hour cycle preference: ${hourCyclePreference}`);
-
-    log.info('app.ready: preferred system locales:', preferredSystemLocales);
-    resolvedTranslationsLocale = loadLocale({
-      rootDir,
-      hourCyclePreference,
-      isPackaged: app.isPackaged,
-      localeDirectionTestingOverride,
-      localeOverride,
-      logger: log,
-      preferredSystemLocales,
-    });
-  }
+  resolveTranslationsLocale();
 
   sqlInitPromise = initializeSQL(userDataPath);
 
@@ -2228,7 +2348,7 @@ app.on('ready', async () => {
     );
   }
 
-  GlobalErrors.updateLocale(resolvedTranslationsLocale);
+  GlobalErrors.updateLocale(getResolvedMessagesLocale());
 
   // If the sql initialization takes more than three seconds to complete, we
   // want to notify the user that things are happening
@@ -2285,7 +2405,7 @@ app.on('ready', async () => {
 
       await safeLoadURL(
         loadingWindow,
-        await prepareFileUrl([rootDir, 'loading.html'])
+        prepareFileUrl([rootDir, 'loading.html'])
       );
     })
   );
@@ -2354,7 +2474,7 @@ app.on('ready', async () => {
   setupMenu();
 
   systemTrayService = new SystemTrayService({
-    i18n: resolvedTranslationsLocale.i18n,
+    i18n: getResolvedMessagesLocale().i18n,
   });
   systemTrayService.setMainWindow(mainWindow);
   systemTrayService.setEnabled(
@@ -2641,22 +2761,9 @@ if (!app.isDefaultProtocolClient('signalcaptcha')) {
   );
 }
 
-ipc.on(
-  'set-badge',
-  (_event: Electron.Event, badge: number | 'marked-unread') => {
-    if (badge === 'marked-unread') {
-      if (process.platform === 'darwin') {
-        // Will show a ● on macOS when undefined
-        app.setBadgeCount(undefined);
-      } else {
-        // All other OS's need a number
-        app.setBadgeCount(1);
-      }
-    } else {
-      app.setBadgeCount(badge);
-    }
-  }
-);
+ipc.on('set-badge-count', (_event: Electron.Event, badgeCount: number) => {
+  app.setBadgeCount(badgeCount);
+});
 
 ipc.on('remove-setup-menu-items', () => {
   setupMenu();
@@ -2826,19 +2933,6 @@ function removeDarkOverlay() {
 ipc.on('get-config', async event => {
   const theme = await getResolvedThemeSetting();
 
-  const directoryConfig = safeParseLoose(directoryConfigSchema, {
-    directoryUrl: config.get<string | null>('directoryUrl') || undefined,
-    directoryMRENCLAVE:
-      config.get<string | null>('directoryMRENCLAVE') || undefined,
-  });
-  if (!directoryConfig.success) {
-    throw new Error(
-      `prepareUrl: Failed to parse renderer directory config ${JSON.stringify(
-        directoryConfig.error.flatten()
-      )}`
-    );
-  }
-
   const parsed = safeParseLoose(rendererConfigSchema, {
     name: packageJson.productName,
     availableLocales: getResolvedMessagesLocale().availableLocales,
@@ -2894,8 +2988,6 @@ ipc.on('get-config', async event => {
     homePath: app.getPath('home'),
     installPath: rootDir,
     userDataPath: app.getPath('userData'),
-
-    directoryConfig: directoryConfig.data,
 
     // Only used by the main window
     isMainWindowFullScreen: Boolean(mainWindow?.isFullScreen()),
@@ -3132,6 +3224,15 @@ ipc.handle('get-media-access-status', async (_event, value) => {
 ipc.handle(
   'open-system-media-permissions',
   async (_event, mediaType: 'camera' | 'microphone' | 'screenCapture') => {
+    if (OS.isWindows()) {
+      // Windows has no privacy page for screenCapture
+      if (mediaType === 'camera') {
+        await shell.openExternal('ms-settings:privacy-webcam');
+      } else if (mediaType === 'microphone') {
+        await shell.openExternal('ms-settings:privacy-microphone');
+      }
+      return;
+    }
     if (!OS.isMacOS()) {
       return;
     }
@@ -3235,7 +3336,6 @@ ipc.handle(
       ({ canceled, filePaths: selectedDirPaths } = await dialog.showOpenDialog(
         mainWindow,
         {
-          defaultPath: app.getPath('downloads'),
           properties: ['openDirectory', 'createDirectory'],
           buttonLabel,
           title,
@@ -3243,7 +3343,6 @@ ipc.handle(
       ));
     } else {
       ({ canceled, filePaths: selectedDirPaths } = await dialog.showOpenDialog({
-        defaultPath: app.getPath('downloads'),
         properties: ['openDirectory', 'createDirectory'],
         buttonLabel,
         title,
@@ -3387,7 +3486,7 @@ async function showStickerCreatorWindow() {
       nodeIntegrationInWorker: false,
       sandbox: true,
       contextIsolation: true,
-      preload: join(rootDir, 'bundles', 'sticker-creator', 'preload.js'),
+      preload: join(rootDir, 'bundles', 'preload', 'sticker-creator.js'),
       nativeWindowOpen: true,
     },
   };
@@ -3406,7 +3505,7 @@ async function showStickerCreatorWindow() {
 
   await safeLoadURL(
     stickerCreatorWindow,
-    await prepareFileUrl([rootDir, 'sticker-creator', 'dist', 'index.html'])
+    prepareFileUrl([rootDir, 'sticker-creator', 'dist', 'index.html'])
   );
 }
 

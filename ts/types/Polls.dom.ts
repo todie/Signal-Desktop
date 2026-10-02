@@ -9,7 +9,7 @@ import { aciSchema } from './ServiceId.std.ts';
 import { MAX_MESSAGE_BODY_BYTE_LENGTH } from '../util/longAttachment.std.ts';
 
 // temporarily limit poll questions to an outbound 100 char and an inbound 200 char
-export const POLL_QUESTION_MAX_LENGTH_RECEIVE = 200;
+const POLL_QUESTION_MAX_LENGTH_RECEIVE = 200;
 export const POLL_QUESTION_MAX_LENGTH_SEND = 100;
 export const POLL_OPTION_MAX_LENGTH = 100;
 export const POLL_OPTIONS_MIN_COUNT = 2;
@@ -31,7 +31,8 @@ export const PollCreateSchema = z
         }
       )
       .refine(
-        // oxlint-disable-next-line no-undef FIXME
+        // FIXME
+        // oxlint-disable-next-line no-undef
         value => Buffer.byteLength(value) <= MAX_MESSAGE_BODY_BYTE_LENGTH,
         {
           message: `question must contain at most ${MAX_MESSAGE_BODY_BYTE_LENGTH} bytes`,
@@ -46,7 +47,8 @@ export const PollCreateSchema = z
             message: `option must contain at most ${POLL_OPTION_MAX_LENGTH} characters`,
           })
           .refine(
-            // oxlint-disable-next-line no-undef FIXME
+            // FIXME
+            // oxlint-disable-next-line no-undef
             value => Buffer.byteLength(value) <= MAX_MESSAGE_BODY_BYTE_LENGTH,
             {
               message: `option must contain at most ${MAX_MESSAGE_BODY_BYTE_LENGTH} bytes`,

@@ -1,7 +1,7 @@
 // Copyright 2019 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import React, { useCallback, useMemo, memo } from 'react';
+import { useCallback, useMemo, memo } from 'react';
 import { useSelector } from 'react-redux';
 import { CompositionArea } from '../../components/CompositionArea.dom.tsx';
 import { useContactNameData } from '../../components/conversation/ContactName.dom.tsx';
@@ -11,7 +11,7 @@ import type {
 } from '../../types/BodyRange.std.ts';
 import { hydrateRanges } from '../../util/BodyRange.node.ts';
 import { strictAssert } from '../../util/assert.std.ts';
-import { getAddedByForOurPendingInvitation } from '../../util/getAddedByForOurPendingInvitation.preload.ts';
+import { getAddedByForGroup } from '../../util/getAddedByForGroup.preload.ts';
 import { AutoSubstituteAsciiEmojis } from '../../quill/auto-substitute-ascii-emojis/index.dom.tsx';
 import { imageToBlurHash } from '../../util/imageToBlurHash.dom.ts';
 import { isConversationSMSOnly } from '../../util/isConversationSMSOnly.std.ts';
@@ -59,7 +59,6 @@ import { useToastActions } from '../ducks/toast.preload.ts';
 import { isShowingAnyModal } from '../selectors/globalModals.std.ts';
 import { isConversationEverUnregistered } from '../../util/isConversationUnregistered.dom.ts';
 import { isDirectConversation } from '../../util/whatTypeOfConversation.dom.ts';
-import { isConversationMuted } from '../../util/isConversationMuted.std.ts';
 import { itemStorage } from '../../textsecure/Storage.preload.ts';
 import { useNavActions } from '../ducks/nav.std.ts';
 import { isFeaturedEnabledSelector } from '../../util/isFeatureEnabled.dom.ts';
@@ -81,6 +80,7 @@ export const SmartCompositionArea = memo(function SmartCompositionArea({
 }) {
   const conversationSelector = useSelector(getConversationSelector);
   const conversation = conversationSelector(id);
+  const isGroup = conversation.type === 'group';
   strictAssert(conversation, `Conversation id ${id} not found!`);
 
   const i18n = useSelector(getIntl);
@@ -120,7 +120,6 @@ export const SmartCompositionArea = memo(function SmartCompositionArea({
     isViewOnce,
     linkPreviewLoading,
     linkPreviewResult,
-    messageCompositionId,
     sendCounter,
     shouldSendHighQualityAttachments,
   } = composerState;
@@ -151,7 +150,7 @@ export const SmartCompositionArea = memo(function SmartCompositionArea({
 
   const addedBy = useMemo(() => {
     if (conversation.type === 'group') {
-      return getAddedByForOurPendingInvitation(conversation);
+      return getAddedByForGroup(conversation);
     }
     return null;
   }, [conversation]);
@@ -190,6 +189,7 @@ export const SmartCompositionArea = memo(function SmartCompositionArea({
           conversationSelector,
           ourConversationId,
           defaultConversationColor,
+          isGroup,
         })
       : undefined;
   }, [
@@ -197,6 +197,7 @@ export const SmartCompositionArea = memo(function SmartCompositionArea({
     conversationSelector,
     ourConversationId,
     defaultConversationColor,
+    isGroup,
   ]);
 
   const {
@@ -226,12 +227,16 @@ export const SmartCompositionArea = memo(function SmartCompositionArea({
     toggleSelectMode,
     scrollToMessage,
     setMessageToEdit,
-    setMuteExpiration,
     showConversation,
   } = useConversationsActions();
   const { pushPanelForConversation } = useNavActions();
-  const { cancelRecording, completeRecording, startRecording, errorRecording } =
-    useAudioRecorderActions();
+  const {
+    cancelRecording,
+    completeRecording,
+    warmupRecording,
+    startRecording,
+    errorRecording,
+  } = useAudioRecorderActions();
   const { onUseEmoji } = useEmojisActions();
   const {
     showGV2MigrationDialog,
@@ -242,6 +247,23 @@ export const SmartCompositionArea = memo(function SmartCompositionArea({
   const { onEditorStateChange } = useComposerActions();
 
   AutoSubstituteAsciiEmojis.enable(itemStorage.get('autoConvertEmoji', true));
+  const { accountEntropyPool } = items;
+
+  const textIncludesRecoveryKey = useCallback(
+    (text: string) => {
+      if (!accountEntropyPool) {
+        return false;
+      }
+      const normalizedText = text
+        .toUpperCase()
+        .replace(/\s/g, '')
+        .replace(/#/g, 'O')
+        .replace(/=/g, '0');
+
+      return normalizedText.includes(accountEntropyPool.toUpperCase());
+    },
+    [accountEntropyPool]
+  );
 
   return (
     <CompositionArea
@@ -263,7 +285,6 @@ export const SmartCompositionArea = memo(function SmartCompositionArea({
       })}
       isActive={isActive}
       lastEditableMessageId={lastEditableMessageId ?? null}
-      messageCompositionId={messageCompositionId}
       platform={platform}
       ourConversationId={ourConversationId}
       sendCounter={sendCounter}
@@ -271,6 +292,7 @@ export const SmartCompositionArea = memo(function SmartCompositionArea({
       theme={theme}
       convertDraftBodyRangesIntoHydrated={convertDraftBodyRangesIntoHydrated}
       onTextTooLong={onTextTooLong}
+      textIncludesRecoveryKey={textIncludesRecoveryKey}
       pushPanelForConversation={pushPanelForConversation}
       discardEditMessage={discardEditMessage}
       onCloseLinkPreview={onCloseLinkPreview}
@@ -282,6 +304,7 @@ export const SmartCompositionArea = memo(function SmartCompositionArea({
       recordingState={recordingState}
       cancelRecording={cancelRecording}
       completeRecording={completeRecording}
+      warmupRecording={warmupRecording}
       startRecording={startRecording}
       errorRecording={errorRecording}
       // AttachmentsList
@@ -340,8 +363,6 @@ export const SmartCompositionArea = memo(function SmartCompositionArea({
       getSharedGroupNames={getSharedGroupNames}
       // Signal Conversation
       isSignalConversation={isSignalConversation(conversation)}
-      isMuted={isConversationMuted(conversation)}
-      setMuteExpiration={setMuteExpiration}
       // Groups
       groupVersion={conversation.groupVersion ?? null}
       isGroupV1AndDisabled={conversation.isGroupV1AndDisabled ?? null}

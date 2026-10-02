@@ -158,7 +158,7 @@ export type ContextType = {
 const INITIAL_SCHEMA_VERSION = 0;
 
 // Placeholder until we have stronger preconditions:
-export const isValid = (_message: MessageAttributesType): boolean => true;
+const isValid = (_message: MessageAttributesType): boolean => true;
 
 // Schema
 export const initializeSchemaVersion = ({
@@ -288,7 +288,7 @@ export type UpgradeAttachmentType = (
   message: MessageAttributesType
 ) => Promise<AttachmentType>;
 
-export const _mapAttachments =
+const _mapAttachments =
   (upgradeAttachment: UpgradeAttachmentType) =>
   async (
     message: MessageAttributesType,
@@ -306,6 +306,7 @@ export const _mapAttachments =
     return { ...message, attachments };
   };
 
+/** @testexport */
 export const _mapAllAttachments =
   (upgradeAttachment: UpgradeAttachmentType) =>
   async (
@@ -424,7 +425,7 @@ export const _mapQuotedAttachments =
 //      _mapPreviewAttachments :: (PreviewAttachment -> Promise PreviewAttachment) ->
 //                               (Message, Context) ->
 //                               Promise Message
-export const _mapPreviewAttachments =
+const _mapPreviewAttachments =
   (upgradeAttachment: UpgradeAttachmentType) =>
   async (
     message: MessageAttributesType,
@@ -528,11 +529,7 @@ const toVersion10 = _withSchemaVersion({
         ...stickerMessage,
         sticker: {
           ...sticker,
-          data: await migrateDataToFileSystem(
-            sticker.data,
-            stickerContext,
-            stickerMessage
-          ),
+          data: await migrateDataToFileSystem(sticker.data, stickerContext),
         },
       };
     };
@@ -705,6 +702,8 @@ export const CURRENT_SCHEMA_VERSION = VERSIONS.length - 1;
 // We need dimensions and screenshots for images for proper display
 export const VERSION_NEEDED_FOR_DISPLAY = 9;
 
+export const MESSAGE_VERSION_WITH_NORMALIZED_ATTACHMENTS = 15;
+
 // UpgradeStep
 export const upgradeSchema = async (
   rawMessage: MessageAttributesType,
@@ -846,7 +845,7 @@ export const processNewSticker = async (
   }
 
   const local = await writeNewStickerData(stickerData);
-  const url = await getLocalAttachmentUrl(local, {
+  const url = getLocalAttachmentUrl(local, {
     disposition: isEphemeral
       ? AttachmentDisposition.Temporary
       : AttachmentDisposition.Sticker,
@@ -867,25 +866,6 @@ export const processNewSticker = async (
 type LoadAttachmentType = (
   attachment: Partial<AttachmentType>
 ) => Promise<AttachmentWithHydratedData>;
-
-export const createAttachmentLoader = (
-  loadAttachmentData: LoadAttachmentType
-): ((message: MessageAttributesType) => Promise<MessageAttributesType>) => {
-  if (!isFunction(loadAttachmentData)) {
-    throw new TypeError(
-      'createAttachmentLoader: loadAttachmentData is required'
-    );
-  }
-
-  return async (
-    message: MessageAttributesType
-  ): Promise<MessageAttributesType> => ({
-    ...message,
-    attachments: await Promise.all(
-      (message.attachments || []).map(loadAttachmentData)
-    ),
-  });
-};
 
 export const loadQuoteData = (
   loadAttachmentData: LoadAttachmentType
@@ -1055,9 +1035,6 @@ export async function migrateBodyAttachmentToDisk(
     bodyAttachment,
   };
 }
-
-export const isUserMessage = (message: MessageAttributesType): boolean =>
-  message.type === 'incoming' || message.type === 'outgoing';
 
 export const isExpiringMessage = (message: MessageAttributesType): boolean => {
   const { expireTimer } = message;

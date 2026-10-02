@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { ReactNode } from 'react';
-import React from 'react';
 import lodash from 'lodash';
 
 import type { ToFindType } from './LeftPaneHelper.dom.tsx';
@@ -19,7 +18,6 @@ import type {
 import { LeftPaneSearchInput } from '../LeftPaneSearchInput.dom.tsx';
 import type { LeftPaneSearchPropsType } from './LeftPaneSearchHelper.dom.tsx';
 import { LeftPaneSearchHelper } from './LeftPaneSearchHelper.dom.tsx';
-import * as KeyboardLayout from '../../services/keyboardLayout.dom.ts';
 
 const { last } = lodash;
 
@@ -35,6 +33,7 @@ export type LeftPaneArchivePropsType =
   | LeftPaneArchiveBasePropsType
   | (LeftPaneArchiveBasePropsType & LeftPaneSearchPropsType);
 
+// oxlint-disable-next-line react/prefer-function-component
 export class LeftPaneArchiveHelper extends LeftPaneHelper<LeftPaneArchivePropsType> {
   readonly #archivedConversations: ReadonlyArray<ConversationListItemPropsType>;
   readonly #isSearchingGlobally: boolean;
@@ -242,12 +241,11 @@ export class LeftPaneArchiveHelper extends LeftPaneHelper<LeftPaneArchivePropsTy
       return;
     }
 
-    const { ctrlKey, metaKey, shiftKey } = event;
+    const { key, ctrlKey, metaKey, shiftKey } = event;
     const commandKey = window.platform === 'darwin' && metaKey;
     const controlKey = window.platform !== 'darwin' && ctrlKey;
     const commandOrCtrl = commandKey || controlKey;
     const commandAndCtrl = commandKey && ctrlKey;
-    const key = KeyboardLayout.lookup(event);
 
     if (
       commandOrCtrl &&

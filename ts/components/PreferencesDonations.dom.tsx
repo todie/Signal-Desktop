@@ -1,10 +1,10 @@
 // Copyright 2025 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import lodash from 'lodash';
 
-import type { MutableRefObject, ReactNode } from 'react';
+import type { MutableRefObject, ReactNode, JSX } from 'react';
 import { ListBox, ListBoxItem } from 'react-aria-components';
 import type { ReadonlyDeep } from 'type-fest';
 import { getDateTimeFormatter } from '../util/formatTimestamp.dom.ts';
@@ -58,6 +58,8 @@ import { DonationsOfflineTooltip } from './conversation/DonationsOfflineTooltip.
 import { getInProgressDonation } from '../util/donations.dom.ts';
 import { AxoButton } from '../axo/AxoButton.dom.tsx';
 import { tw } from '../axo/tw.dom.tsx';
+import { BadgeImage } from './BadgeImage.dom.tsx';
+import { SpinnerV2 } from './SpinnerV2.dom.tsx';
 
 const { groupBy, sortBy } = lodash;
 
@@ -75,7 +77,7 @@ export type PropsDataType = {
   didResumeWorkflowAtStartup: boolean;
   lastError: DonationErrorType | undefined;
   workflow: DonationWorkflow | undefined;
-  badge: BadgeType | undefined;
+  myBadge: BadgeType | undefined;
   color: AvatarColorType | undefined;
   firstName: string | undefined;
   profileAvatarUrl?: string;
@@ -129,10 +131,11 @@ type PreferencesHomeProps = Pick<
   | 'i18n'
   | 'setSettingsLocation'
   | 'isOnline'
+  | 'donationBadge'
   | 'donationReceipts'
   | 'workflow'
 > & {
-  renderDonationHero: () => React.JSX.Element;
+  renderDonationHero: () => JSX.Element;
 };
 
 export function isDonationsPage(page: SettingsPage): page is DonationPage {
@@ -145,22 +148,22 @@ export function isDonationsPage(page: SettingsPage): page is DonationPage {
 
 type DonationHeroProps = Pick<
   PropsDataType,
-  'badge' | 'color' | 'firstName' | 'i18n' | 'profileAvatarUrl' | 'theme'
+  'myBadge' | 'color' | 'firstName' | 'i18n' | 'profileAvatarUrl' | 'theme'
 > & {
   showPrivacyModal: () => void;
 };
 
 function DonationHero({
-  badge,
+  myBadge,
   color,
   firstName,
   i18n,
   profileAvatarUrl,
   theme,
   showPrivacyModal,
-}: DonationHeroProps): React.JSX.Element {
+}: DonationHeroProps): JSX.Element {
   const privacyReadMoreLink = useCallback(
-    (parts: ReactNode): React.JSX.Element => {
+    (parts: ReactNode): JSX.Element => {
       return (
         <button
           type="button"
@@ -179,7 +182,7 @@ function DonationHero({
       <div className="PreferencesDonations__avatar">
         <Avatar
           avatarUrl={profileAvatarUrl}
-          badge={badge}
+          badge={myBadge}
           color={color}
           conversationType="direct"
           title={firstName ?? ''}
@@ -209,9 +212,10 @@ function DonationsHome({
   renderDonationHero,
   setSettingsLocation,
   isOnline,
+  donationBadge,
   donationReceipts,
   workflow,
-}: PreferencesHomeProps): React.JSX.Element {
+}: PreferencesHomeProps): JSX.Element {
   const [isInProgressModalVisible, setIsInProgressVisible] = useState(false);
 
   const inProgressDonationAmount = useMemo<string | undefined>(() => {
@@ -238,7 +242,7 @@ function DonationsHome({
   const donateButton = (
     <span className={tw('mb-8')}>
       <AxoButton.Root
-        variant={isOnline ? 'primary' : 'secondary'}
+        variant={isOnline ? 'strong-primary' : 'strong-secondary'}
         size="lg"
         disabled={!isOnline}
         onClick={handleDonateButtonClicked}
@@ -281,7 +285,13 @@ function DonationsHome({
             className="PreferencesDonations__badge"
             onAction={handleInProgressDonationClicked}
           >
-            <div className="PreferencesDonations__badge-icon PreferencesDonations__badge-icon--one-time" />
+            <div className="PreferencesDonations__badge-icon">
+              {donationBadge ? (
+                <BadgeImage badge={donationBadge} size={40} />
+              ) : (
+                <SpinnerV2 size={40} strokeWidth={3} variant="brand" />
+              )}
+            </div>
             <div className="PreferencesDonations__badge-info">
               <div className="PreferencesDonations__badge-label">
                 {i18n('icu:PreferencesDonations__badge-label-one-time', {
@@ -336,12 +346,14 @@ function DonationsHome({
 
 function PreferencesReceiptList({
   i18n,
+  donationBadge,
   donationReceipts,
   saveAttachmentToDisk,
   generateDonationReceiptBlob,
   showToast,
 }: {
   i18n: LocalizerType;
+  donationBadge: BadgeType | undefined;
   donationReceipts: ReadonlyArray<DonationReceipt>;
   saveAttachmentToDisk: (options: {
     data: Uint8Array<ArrayBuffer>;
@@ -353,7 +365,7 @@ function PreferencesReceiptList({
     i18n: LocalizerType
   ) => Promise<Blob>;
   showToast: (toast: AnyToast) => void;
-}): React.JSX.Element {
+}): JSX.Element {
   const [selectedReceipt, setSelectedReceipt] =
     useState<DonationReceipt | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -404,6 +416,7 @@ function PreferencesReceiptList({
       showToast({
         toastType: ToastType.ReceiptSaveFailed,
       });
+      // oxlint-disable-next-line react/todo
     } finally {
       setIsDownloading(false);
     }
@@ -450,7 +463,13 @@ function PreferencesReceiptList({
                     onClick={() => setSelectedReceipt(receipt)}
                     type="button"
                   >
-                    <div className="PreferencesDonations--receiptList__receipt-item__icon" />
+                    <div className="PreferencesDonations--receiptList__receipt-item__icon">
+                      {donationBadge ? (
+                        <BadgeImage badge={donationBadge} size={32} />
+                      ) : (
+                        <SpinnerV2 size={32} strokeWidth={3} variant="brand" />
+                      )}
+                    </div>
                     <div className="PreferencesDonations--receiptList__receipt-item__details">
                       <div className="PreferencesDonations--receiptList__receipt-item__date">
                         {dateFormatter.format(new Date(receipt.timestamp))}
@@ -557,7 +576,7 @@ export function PreferencesDonations({
   resumeWorkflow,
   setSettingsLocation,
   submitDonation,
-  badge,
+  myBadge,
   color,
   firstName,
   profileAvatarUrl,
@@ -571,7 +590,7 @@ export function PreferencesDonations({
   updateLastError,
   donationBadge,
   fetchBadgeData,
-}: PropsType): React.JSX.Element | null {
+}: PropsType): JSX.Element | null {
   const [hasProcessingExpired, setHasProcessingExpired] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
 
@@ -580,7 +599,7 @@ export function PreferencesDonations({
   // Fetch badge data when we're about to show the badge modal
   useEffect(() => {
     if (
-      workflow?.type === donationStateSchema.Enum.DONE &&
+      workflow?.type === donationStateSchema.enum.DONE &&
       settingsLocation.page === SettingsPage.Donations &&
       !donationBadge
     ) {
@@ -590,14 +609,15 @@ export function PreferencesDonations({
 
   useEffect(() => {
     if (lastError) {
+      // oxlint-disable-next-line react/set-state-in-effect
       setIsSubmitted(false);
     }
 
     if (
-      workflow?.type === donationStateSchema.Enum.INTENT_CONFIRMED ||
-      workflow?.type === donationStateSchema.Enum.PAYMENT_CONFIRMED ||
-      workflow?.type === donationStateSchema.Enum.RECEIPT ||
-      workflow?.type === donationStateSchema.Enum.DONE
+      workflow?.type === donationStateSchema.enum.INTENT_CONFIRMED ||
+      workflow?.type === donationStateSchema.enum.PAYMENT_CONFIRMED ||
+      workflow?.type === donationStateSchema.enum.RECEIPT ||
+      workflow?.type === donationStateSchema.enum.DONE
     ) {
       setIsSubmitted(false);
     }
@@ -606,7 +626,7 @@ export function PreferencesDonations({
   const renderDonationHero = useCallback(
     () => (
       <DonationHero
-        badge={badge}
+        myBadge={myBadge}
         color={color}
         firstName={firstName}
         i18n={i18n}
@@ -615,7 +635,7 @@ export function PreferencesDonations({
         showPrivacyModal={() => setIsPrivacyModalVisible(true)}
       />
     ),
-    [badge, color, firstName, i18n, profileAvatarUrl, theme]
+    [myBadge, color, firstName, i18n, profileAvatarUrl, theme]
   );
 
   if (!isDonationsPage(settingsLocation.page)) {
@@ -632,7 +652,7 @@ export function PreferencesDonations({
           setIsSubmitted(false);
           if (
             workflow?.type === 'DONE' &&
-            lastError === donationErrorTypeSchema.Enum.BadgeApplicationFailed
+            lastError === donationErrorTypeSchema.enum.BadgeApplicationFailed
           ) {
             clearWorkflow();
           }
@@ -642,7 +662,7 @@ export function PreferencesDonations({
     );
   } else if (
     didResumeWorkflowAtStartup &&
-    workflow?.type === donationStateSchema.Enum.INTENT_METHOD
+    workflow?.type === donationStateSchema.enum.INTENT_METHOD
   ) {
     dialog = (
       <DonationInterruptedModal
@@ -657,7 +677,7 @@ export function PreferencesDonations({
         }}
       />
     );
-  } else if (workflow?.type === donationStateSchema.Enum.INTENT_REDIRECT) {
+  } else if (workflow?.type === donationStateSchema.enum.INTENT_REDIRECT) {
     dialog = (
       <DonationVerificationModal
         i18n={i18n}
@@ -671,12 +691,12 @@ export function PreferencesDonations({
         }}
         onTimedOut={() => {
           clearWorkflow();
-          updateLastError(donationErrorTypeSchema.Enum.TimedOut);
+          updateLastError(donationErrorTypeSchema.enum.TimedOut);
           setSettingsLocation({ page: SettingsPage.Donations });
         }}
       />
     );
-  } else if (workflow?.type === donationStateSchema.Enum.DONE) {
+  } else if (workflow?.type === donationStateSchema.enum.DONE) {
     dialog = (
       <DonationThanksModal
         i18n={i18n}
@@ -686,7 +706,7 @@ export function PreferencesDonations({
           if (error) {
             log.error('Badge application failed:', error.message);
             updateLastError(
-              donationErrorTypeSchema.Enum.BadgeApplicationFailed
+              donationErrorTypeSchema.enum.BadgeApplicationFailed
             );
           } else {
             clearWorkflow();
@@ -697,17 +717,17 @@ export function PreferencesDonations({
   } else if (
     settingsLocation.page === SettingsPage.DonationsDonateFlow &&
     (isSubmitted ||
-      workflow?.type === donationStateSchema.Enum.INTENT_CONFIRMED ||
-      workflow?.type === donationStateSchema.Enum.PAYMENT_CONFIRMED ||
-      workflow?.type === donationStateSchema.Enum.RECEIPT)
+      workflow?.type === donationStateSchema.enum.INTENT_CONFIRMED ||
+      workflow?.type === donationStateSchema.enum.PAYMENT_CONFIRMED ||
+      workflow?.type === donationStateSchema.enum.RECEIPT)
   ) {
     // We can't transition away from the payment screen until that payment information
     // has been accepted. Even if it takes more than 30 seconds.
     if (
       hasProcessingExpired &&
-      (workflow?.type === donationStateSchema.Enum.INTENT_CONFIRMED ||
-        workflow?.type === donationStateSchema.Enum.PAYMENT_CONFIRMED ||
-        workflow?.type === donationStateSchema.Enum.RECEIPT)
+      (workflow?.type === donationStateSchema.enum.INTENT_CONFIRMED ||
+        workflow?.type === donationStateSchema.enum.PAYMENT_CONFIRMED ||
+        workflow?.type === donationStateSchema.enum.RECEIPT)
     ) {
       dialog = (
         <DonationStillProcessingModal
@@ -720,7 +740,7 @@ export function PreferencesDonations({
           }}
         />
       );
-    } else if (workflow?.type === donationStateSchema.Enum.PAYPAL_INTENT) {
+    } else if (workflow?.type === donationStateSchema.enum.PAYPAL_INTENT) {
       // No need to show the dialog here because PreferencesDonateFlow already
       // initiates a dialog when redirecting to PayPal.
     } else {
@@ -748,6 +768,7 @@ export function PreferencesDonations({
         {dialog}
         {privacyModal}
         <PreferencesDonateFlow
+          badge={donationBadge}
           contentsRef={contentsRef}
           i18n={i18n}
           isOnline={isOnline}
@@ -777,6 +798,7 @@ export function PreferencesDonations({
         contentsRef={contentsRef}
         i18n={i18n}
         isOnline={isOnline}
+        donationBadge={donationBadge}
         donationReceipts={donationReceipts}
         renderDonationHero={renderDonationHero}
         setSettingsLocation={setSettingsLocation}
@@ -787,6 +809,7 @@ export function PreferencesDonations({
     content = (
       <PreferencesReceiptList
         i18n={i18n}
+        donationBadge={donationBadge}
         donationReceipts={donationReceipts}
         saveAttachmentToDisk={saveAttachmentToDisk}
         generateDonationReceiptBlob={generateDonationReceiptBlob}
@@ -796,7 +819,7 @@ export function PreferencesDonations({
   }
 
   let title: string | undefined;
-  let backButton: React.JSX.Element | undefined;
+  let backButton: JSX.Element | undefined;
   if (settingsLocation.page === SettingsPage.Donations) {
     title = i18n('icu:Preferences__DonateTitle');
   } else if (settingsLocation.page === SettingsPage.DonationsReceiptList) {

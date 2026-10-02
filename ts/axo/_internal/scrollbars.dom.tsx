@@ -17,11 +17,11 @@ type Listener = () => void;
 type Unsubscribe = () => void;
 
 class ScrollbarGuttersObserver {
-  #container: HTMLDivElement;
-  #scroller: HTMLDivElement;
+  readonly #container: HTMLDivElement;
+  readonly #scroller: HTMLDivElement;
   #current: ScrollbarGutters | null;
-  #observer: ResizeObserver;
-  #listeners = new Set<Listener>();
+  readonly #observer: ResizeObserver;
+  readonly #listeners = new Set<Listener>();
 
   constructor(scrollbarWidth: Exclude<ScrollbarWidth, 'none'>) {
     const container = document.createElement('div');
@@ -153,6 +153,16 @@ function applyGlobalProperties(
   };
 }
 
+/**
+ * Mounts hidden scrollers into the DOM to measure system scrollbar gutter widths.
+ *
+ * Provides values as custom CSS properties on `<html>`:
+ *
+ * - `--axo-scrollbar-gutter-auto-vertical`
+ * - `--axo-scrollbar-gutter-auto-horizontal`
+ * - `--axo-scrollbar-gutter-thin-vertical`
+ * - `--axo-scrollbar-gutter-thin-horizontal`
+ */
 export function createScrollbarGutterCssProperties(): Unsubscribe {
   const autoObserver = new ScrollbarGuttersObserver('auto');
   const thinObserver = new ScrollbarGuttersObserver('thin');

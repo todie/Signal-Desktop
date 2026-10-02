@@ -35,6 +35,7 @@ import type {
 } from './preload.preload.ts';
 import { SystemTraySetting } from '../types/SystemTraySetting.std.ts';
 import { putStickers } from '../textsecure/WebAPI.preload.ts';
+import type { PDFWindowPropsType } from '../windows/pdf/types.std.ts';
 import OS from './os/osPreload.preload.ts';
 
 const { noop } = lodash;
@@ -60,6 +61,7 @@ export type IPCEventsCallbacksType = {
     mediaType: 'screen' | 'microphone' | 'camera'
   ) => Promise<ReturnType<SystemPreferences['getMediaAccessStatus']>>;
   installStickerPack: (packId: string, key: string) => Promise<void>;
+  generatePDF: (args: PDFWindowPropsType) => Promise<Uint8Array<ArrayBuffer>>;
   requestCloseConfirmation: () => Promise<boolean>;
   setMediaPlaybackDisabled: (playbackDisabled: boolean) => void;
   showConversationViaNotification: (data: NotificationClickData) => void;
@@ -274,19 +276,22 @@ export function createIPCEvents(
         actionSource: 'ui',
       });
     },
+    generatePDF: (args: PDFWindowPropsType) => {
+      return ipcRenderer.invoke('pdf:generate', args);
+    },
     requestCloseConfirmation: async (): Promise<boolean> => {
       try {
         await new Promise<void>((resolve, reject) => {
           showConfirmationDialog({
-            dialogName: 'closeConfirmation',
-            onTopOfEverything: true,
             cancelText: i18n(
               'icu:ConfirmationDialog__Title--close-requested-not-now'
             ),
-            confirmStyle: 'negative',
+            confirmStyle: 'strong-destructive',
             title: i18n(
               'icu:ConfirmationDialog__Title--in-call-close-requested'
             ),
+            // @ts-expect-error ConfirmationDialog migration: Needs title
+            description: null,
             okText: i18n('icu:close'),
             reject: () => reject(),
             resolve: () => resolve(),
@@ -452,6 +457,7 @@ export function createIPCEvents(
 
 function showUnknownSgnlLinkModal(): void {
   window.reduxActions.globalModals.showErrorModal({
+    title: i18n('icu:ErrorModal--title'),
     description: i18n('icu:unknown-sgnl-link'),
   });
 }

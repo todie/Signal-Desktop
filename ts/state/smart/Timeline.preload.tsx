@@ -1,7 +1,7 @@
 // Copyright 2019 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import React, { memo, useCallback } from 'react';
+import { memo, useCallback, useRef, useMemo, type JSX } from 'react';
 import { useSelector } from 'react-redux';
 import { isEqual } from 'lodash';
 
@@ -24,11 +24,7 @@ import { SmartHeroRow } from './HeroRow.preload.tsx';
 import { SmartTimelineItem } from './TimelineItem.preload.tsx';
 import { SmartTypingBubble } from './TypingBubble.preload.tsx';
 import { AttachmentDownloadManager } from '../../jobs/AttachmentDownloadManager.preload.ts';
-import {
-  getActiveCall,
-  getCallSelector,
-  isInFullScreenCall as getIsInFullScreenCall,
-} from '../selectors/calling.std.ts';
+import { getActiveCall, getCallSelector } from '../selectors/calling.std.ts';
 import { getMidnight } from '../../types/NotificationProfile.std.ts';
 
 import type { PropsType as SmartContactSpoofingReviewDialogPropsType } from './ContactSpoofingReviewDialog.preload.tsx';
@@ -37,12 +33,14 @@ import { getCallHistorySelector } from '../selectors/callHistory.std.ts';
 import { getCallIdFromEra } from '../../util/callDisposition.preload.ts';
 import { mapItemsIntoCollapseSets } from '../../util/CollapseSet.std.ts';
 import type { CollapseSet } from '../../util/CollapseSet.std.ts';
+import { isSignalConversation } from '../../util/isSignalConversation.dom.ts';
+import { getIsInFullScreenCall } from '../selectors/isInFullScreenCall.std.ts';
 
 type ExternalProps = {
   id: string;
 };
 
-function renderItem(props: RenderItemProps): React.JSX.Element {
+function renderItem(props: RenderItemProps): JSX.Element {
   return (
     <SmartTimelineItem key={props.item.id} {...props} renderItem={renderItem} />
   );
@@ -50,14 +48,14 @@ function renderItem(props: RenderItemProps): React.JSX.Element {
 
 function renderContactSpoofingReviewDialog(
   props: SmartContactSpoofingReviewDialogPropsType
-): React.JSX.Element {
+): JSX.Element {
   return <SmartContactSpoofingReviewDialog {...props} />;
 }
 
-function renderHeroRow(id: string): React.JSX.Element {
+function renderHeroRow(id: string): JSX.Element {
   return <SmartHeroRow id={id} />;
 }
-function renderTypingBubble(conversationId: string): React.JSX.Element {
+function renderTypingBubble(conversationId: string): JSX.Element {
   return <SmartTypingBubble conversationId={conversationId} />;
 }
 
@@ -132,12 +130,11 @@ export const SmartTimeline = memo(function SmartTimeline({
     totalUnseen,
   } = conversationMessages;
 
-  const previousCollapseSet = React.useRef<Array<CollapseSet> | undefined>(
-    undefined
-  );
+  const previousCollapseSet = useRef<Array<CollapseSet> | undefined>(undefined);
+  // oxlint-disable-next-line react/purity
   const midnightToday = getMidnight(Date.now());
   const { collapseSets, updatedOldestLastSeenIndex, updatedScrollToIndex } =
-    React.useMemo(() => {
+    useMemo(() => {
       const result = mapItemsIntoCollapseSets({
         activeCall,
         allowMultidaySets: false,
@@ -158,12 +155,16 @@ export const SmartTimeline = memo(function SmartTimeline({
       // But we need to massage items based on the values from these params. So, if we
       // generate the same data, we would like to return the same object.
       if (
+        // oxlint-disable-next-line react/refs
         previousCollapseSet.current &&
+        // oxlint-disable-next-line react/refs
         isEqual(resultSets, previousCollapseSet.current)
       ) {
+        // oxlint-disable-next-line react/refs
         resultSets = previousCollapseSet.current;
       }
 
+      // oxlint-disable-next-line react/refs
       previousCollapseSet.current = resultSets;
 
       return {
@@ -187,6 +188,7 @@ export const SmartTimeline = memo(function SmartTimeline({
     !acceptedMessageRequest && removalStage !== 'justNotification';
   const isSomeoneTyping = Object.keys(typingContactIdTimestamps).length > 0;
   const targetedMessageId = targetedMessage?.id;
+  const isSignalConvo = isSignalConversation(conversation);
 
   return (
     <Timeline
@@ -212,6 +214,7 @@ export const SmartTimeline = memo(function SmartTimeline({
       isInFullScreenCall={isInFullScreenCall}
       isIncomingMessageRequest={isIncomingMessageRequest}
       isNearBottom={isNearBottom}
+      isSignalConversation={isSignalConvo}
       isSomeoneTyping={isSomeoneTyping}
       items={collapseSets}
       loadNewerMessages={loadNewerMessages}

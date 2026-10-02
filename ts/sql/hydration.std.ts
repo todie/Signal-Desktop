@@ -2,8 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import lodash from 'lodash';
-import type { ReadStatus } from '../messages/MessageReadStatus.std.ts';
-import type { SeenStatus } from '../MessageSeenStatus.std.ts';
 import type { ServiceIdString } from '../types/ServiceId.std.ts';
 import { dropNull, shallowDropNull } from '../util/dropNull.std.ts';
 import type {
@@ -73,9 +71,7 @@ export function hydrateMessages(
   return hydrateMessagesWithAttachments(db, messagesWithColumnsHydrated);
 }
 
-export function hydrateMessageTableColumns(
-  row: MessageTypeUnhydrated
-): MessageType {
+function hydrateMessageTableColumns(row: MessageTypeUnhydrated): MessageType {
   const {
     json,
     id,
@@ -127,8 +123,8 @@ export function hydrateMessageTableColumns(
     sourceDevice: dropNull(sourceDevice),
     storyId: dropNull(storyId),
     type: type as MessageType['type'],
-    readStatus: readStatus == null ? undefined : (readStatus as ReadStatus),
-    seenStatus: seenStatus == null ? undefined : (seenStatus as SeenStatus),
+    readStatus: readStatus == null ? undefined : readStatus,
+    seenStatus: seenStatus == null ? undefined : seenStatus,
     timestamp: timestamp || 0,
     serverTimestamp: dropNull(serverTimestamp),
     unidentifiedDeliveryReceived: toBoolean(unidentifiedDeliveryReceived),
@@ -375,6 +371,7 @@ export function convertAttachmentDBFieldsToAttachmentType(
     storyTextAttachmentJson,
     copiedFromQuotedAttachment,
     localBackupPath,
+    audioWaveform,
   } = messageAttachment;
 
   const result: AttachmentType = {
@@ -450,6 +447,8 @@ export function convertAttachmentDBFieldsToAttachmentType(
           },
         }
       : {}),
+    audioWaveform:
+      audioWaveform == null ? undefined : Array.from(audioWaveform),
   };
 
   return result;

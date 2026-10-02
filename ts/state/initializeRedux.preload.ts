@@ -15,7 +15,7 @@ import type { StoryDataType } from './ducks/stories.preload.ts';
 import type { StoryDistributionListDataType } from './ducks/storyDistributionLists.preload.ts';
 import type { ThemeType } from '../types/Util.std.ts';
 import type { CallLinkType } from '../types/CallLink.std.ts';
-import type { RecentEmojiObjectType } from '../util/loadRecentEmojis.preload.ts';
+import type { EmojisStateType } from './ducks/emojis.preload.ts';
 import type { StickersStateType } from './ducks/stickers.preload.ts';
 import type { GifsStateType } from './ducks/gifs.preload.ts';
 import type { NotificationProfileType } from '../types/NotificationProfile.std.ts';
@@ -25,16 +25,16 @@ import type { MegaphonesStateType } from './ducks/megaphones.preload.ts';
 export type ReduxInitData = {
   badgesState: BadgesStateType;
   callHistory: ReadonlyArray<CallHistoryDetails>;
-  callHistoryUnreadCount: number;
+  callHistoryUnreadCountsByConversationId: Record<string, number>;
   callLinks: ReadonlyArray<CallLinkType>;
   chatFolders: ReadonlyArray<CurrentChatFolder>;
   donations: DonationsStateType;
+  emojis: EmojisStateType;
   gifs: GifsStateType;
   mainWindowStats: MainWindowStatsType;
   megaphones: MegaphonesStateType;
   menuOptions: MenuOptionsType;
   notificationProfiles: ReadonlyArray<NotificationProfileType>;
-  recentEmoji: RecentEmojiObjectType;
   stickers: StickersStateType;
   stories: Array<StoryDataType>;
   storyDistributionLists: Array<StoryDistributionListDataType>;
@@ -103,6 +103,10 @@ export function initializeRedux(data: ReduxInitData): void {
       store.dispatch
     ),
     search: bindActionCreators(actionCreators.search, store.dispatch),
+    standaloneInstaller: bindActionCreators(
+      actionCreators.standaloneInstaller,
+      store.dispatch
+    ),
     stickers: bindActionCreators(actionCreators.stickers, store.dispatch),
     stories: bindActionCreators(actionCreators.stories, store.dispatch),
     storyDistributionLists: bindActionCreators(

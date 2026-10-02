@@ -1,8 +1,10 @@
 // Copyright 2020 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import React, { memo, useCallback, useMemo } from 'react';
+import { memo, useCallback, useMemo, type JSX } from 'react';
 import { useSelector } from 'react-redux';
+import type { MuteExpiration } from '@signalapp/types';
+
 import { useContactNameData } from '../../components/conversation/ContactName.dom.tsx';
 import {
   ConversationHeader,
@@ -14,7 +16,7 @@ import { CallMode } from '../../types/CallDisposition.std.ts';
 import { PanelType } from '../../types/Panels.std.ts';
 import { StoryViewModeType } from '../../types/Stories.std.ts';
 import { strictAssert } from '../../util/assert.std.ts';
-import { getAddedByForOurPendingInvitation } from '../../util/getAddedByForOurPendingInvitation.preload.ts';
+import { getAddedByForGroup } from '../../util/getAddedByForGroup.preload.ts';
 import { getGroupMemberships } from '../../util/getGroupMemberships.dom.ts';
 import { isConversationSMSOnly } from '../../util/isConversationSMSOnly.std.ts';
 import { isGroupOrAdhocCallState } from '../../util/isGroupOrAdhocCall.std.ts';
@@ -55,15 +57,15 @@ import { useNavActions } from '../ducks/nav.std.ts';
 
 function renderCollidingAvatars(
   props: SmartCollidingAvatarsProps
-): React.JSX.Element {
+): JSX.Element {
   return <SmartCollidingAvatars {...props} />;
 }
 
-function renderMiniPlayer(props: SmartMiniPlayerProps): React.JSX.Element {
+function renderMiniPlayer(props: SmartMiniPlayerProps): JSX.Element {
   return <SmartMiniPlayer {...props} />;
 }
 
-function renderPinnedMessagesBar(): React.JSX.Element {
+function renderPinnedMessagesBar(): JSX.Element {
   return <SmartPinnedMessagesBar />;
 }
 
@@ -175,7 +177,7 @@ export const SmartConversationHeader = memo(function SmartConversationHeader({
 
   const addedBy = useMemo(() => {
     if (conversation.type === 'group') {
-      return getAddedByForOurPendingInvitation(conversation);
+      return getAddedByForGroup(conversation);
     }
     return null;
   }, [conversation]);
@@ -227,8 +229,8 @@ export const SmartConversationHeader = memo(function SmartConversationHeader({
   }, [onMarkUnread, conversation.id]);
 
   const onConversationMuteExpirationChange = useCallback(
-    (seconds: number) => {
-      setMuteExpiration(conversation.id, seconds);
+    (expiration: MuteExpiration) => {
+      setMuteExpiration(conversation.id, expiration);
     },
     [setMuteExpiration, conversation.id]
   );

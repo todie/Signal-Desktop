@@ -3,6 +3,8 @@
 
 import { assert } from 'chai';
 import { randomBytes } from 'node:crypto';
+import { MuteExpiration } from '@signalapp/types';
+
 import { getRandomBytes } from '../../Crypto.node.ts';
 import * as Bytes from '../../Bytes.std.ts';
 import { setupBasics, symmetricRoundtripHarness } from './helpers.preload.ts';
@@ -12,10 +14,13 @@ import {
   deriveGroupSecretParams,
 } from '../../util/zkgroup.node.ts';
 import { DataWriter } from '../../sql/Client.preload.ts';
-import { generateAci, generatePni } from '../../types/ServiceId.std.ts';
 import type { ConversationAttributesType } from '../../model-types.d.ts';
 import { strictAssert } from '../../util/assert.std.ts';
 import { itemStorage } from '../../textsecure/Storage.preload.ts';
+import {
+  generateAci,
+  generatePni,
+} from '../../test-helpers/serviceIdUtils.std.ts';
 
 function getGroupTestInfo() {
   const masterKey = getRandomBytes(32);
@@ -49,7 +54,7 @@ describe('backup/conversations', () => {
       nicknameFamilyName: 'nicknameFamilyName',
       hideStory: true,
       username: 'username.12',
-      muteExpiresAt: Number.MAX_SAFE_INTEGER,
+      muteExpiresAt: MuteExpiration.ALWAYS,
       note: 'note',
       e164: '+16175550000',
       pni: generatePni(),
@@ -105,7 +110,11 @@ describe('backup/conversations', () => {
       }
     );
 
-    await itemStorage.blocked.addBlockedGroup(blockedGroupInfo.groupId);
+    const timestamp = Date.now();
+    await itemStorage.blocked.addBlockedGroup(
+      blockedGroupInfo.groupId,
+      timestamp
+    );
 
     await symmetricRoundtripHarness([]);
 
@@ -113,6 +122,15 @@ describe('backup/conversations', () => {
       blockedGroupInfo.groupId
     );
     assert.isTrue(blockedGroupAfter?.isBlocked());
+    const blockedGroupItem = itemStorage.blocked
+      .getBlockedGroups()
+      .get(blockedGroupInfo.groupId);
+    assert.strictEqual(
+      blockedGroupItem?.blockedAt,
+      timestamp,
+      'Timestamp on blocked group should be rountripped'
+    );
+
     const unblockedGroupAfter = window.ConversationController.get(
       unblockedGroupInfo.groupId
     );

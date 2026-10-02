@@ -34,6 +34,7 @@ import { getEmptyState as notificationProfilesEmptyState } from './ducks/notific
 import { getEmptyState as preferredReactionsEmptyState } from './ducks/preferredReactions.preload.ts';
 import { getEmptyState as safetyNumberEmptyState } from './ducks/safetyNumber.preload.ts';
 import { getEmptyState as searchEmptyState } from './ducks/search.preload.ts';
+import { getEmptyState as standaloneInstallerEmptyState } from './ducks/standaloneInstaller.preload.ts';
 import { getEmptyState as stickersEmptyState } from './ducks/stickers.preload.ts';
 import { getEmptyState as storiesEmptyState } from './ducks/stories.preload.ts';
 import { getEmptyState as storyDistributionListsEmptyState } from './ducks/storyDistributionLists.preload.ts';
@@ -43,7 +44,6 @@ import { getEmptyState as userEmptyState } from './ducks/user.preload.ts';
 import { getEmptyState as usernameEmptyState } from './ducks/username.preload.ts';
 
 import OS from '../util/os/osMain.node.ts';
-import { getInteractionMode } from '../services/InteractionMode.dom.ts';
 import { makeLookup } from '../util/makeLookup.std.ts';
 import {
   ATTACHMENTS_PATH,
@@ -69,14 +69,14 @@ export function getInitialState(
     badgesState,
     callLinks,
     callHistory: calls,
-    callHistoryUnreadCount,
+    callHistoryUnreadCountsByConversationId,
     chatFolders,
     donations,
     gifs,
     mainWindowStats,
     menuOptions,
     notificationProfiles,
-    recentEmoji,
+    emojis,
     stickers,
     stories,
     storyDistributionLists,
@@ -94,7 +94,7 @@ export function getInitialState(
     callHistory: {
       ...callHistoryEmptyState(),
       callHistoryByCallId: makeLookup(calls, 'callId'),
-      unreadCount: callHistoryUnreadCount,
+      unreadCountsByConversationId: callHistoryUnreadCountsByConversationId,
     },
     calling: {
       ...callingEmptyState(),
@@ -102,7 +102,7 @@ export function getInitialState(
     },
     chatFolders: getInitialChatFoldersState(chatFolders),
     donations,
-    emojis: recentEmoji,
+    emojis,
     gifs,
     items,
     megaphones: megaphonesEmptyState(),
@@ -127,7 +127,7 @@ export function getInitialState(
   };
 }
 
-export function generateConversationsState(): ConversationsStateType {
+function generateConversationsState(): ConversationsStateType {
   const convoCollection = window.ConversationController.getAll();
   const formattedConversations = convoCollection.map(conversation =>
     conversation.format()
@@ -178,6 +178,7 @@ function getEmptyState(): StateType {
     preferredReactions: preferredReactionsEmptyState(),
     safetyNumber: safetyNumberEmptyState(),
     search: searchEmptyState(),
+    standaloneInstaller: standaloneInstallerEmptyState(),
     stickers: stickersEmptyState(),
     stories: storiesEmptyState(),
     storyDistributionLists: storyDistributionListsEmptyState(),
@@ -188,7 +189,7 @@ function getEmptyState(): StateType {
   };
 }
 
-export function generateStoryDistributionListState(
+function generateStoryDistributionListState(
   storyDistributionLists: ReadonlyArray<StoryDistributionListDataType>
 ): StoryDistributionListStateType {
   return {
@@ -197,7 +198,7 @@ export function generateStoryDistributionListState(
   };
 }
 
-export function generateUserState({
+function generateUserState({
   mainWindowStats,
   menuOptions,
   theme,
@@ -206,9 +207,9 @@ export function generateUserState({
   menuOptions: MenuOptionsType;
   theme: ThemeType;
 }): UserStateType {
-  const ourNumber = itemStorage.user.getNumber();
+  const ourNumber = itemStorage.user.getOptionalNumber();
   const ourAci = itemStorage.user.getAci();
-  const ourPni = itemStorage.user.getPni();
+  const ourPni = itemStorage.user.getOptionalPni();
   const ourConversationId =
     window.ConversationController.getOurConversationId();
   const ourDeviceId = itemStorage.user.getDeviceId();
@@ -227,7 +228,6 @@ export function generateUserState({
     ...userEmptyState(),
     attachmentsPath: ATTACHMENTS_PATH,
     i18n: window.SignalContext.i18n,
-    interactionMode: getInteractionMode(),
     isMainWindowFullScreen: mainWindowStats.isFullScreen,
     isMainWindowMaximized: mainWindowStats.isMaximized,
     localeMessages: window.SignalContext.i18n.getLocaleMessages(),

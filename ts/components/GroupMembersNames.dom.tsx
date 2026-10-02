@@ -1,8 +1,8 @@
 // Copyright 2025 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import React, { useMemo } from 'react';
-import type { ReactNode } from 'react';
+import { useMemo } from 'react';
+import type { ReactNode, JSX } from 'react';
 import lodash from 'lodash';
 
 import { I18n } from './I18n.dom.tsx';
@@ -24,10 +24,9 @@ type PropsType = {
 function renderClickableButton(
   parts: ReactNode,
   onOtherMembersClick?: () => void
-): React.JSX.Element {
+): JSX.Element {
   return (
     <button
-      className="module-conversation-hero__members-count__button"
       type="button"
       onClick={ev => {
         ev.preventDefault();
@@ -49,11 +48,11 @@ function MemberList({
   onOtherMembersClick,
 }: {
   otherMemberNames: ReadonlyArray<string | undefined>;
-  firstThreeMemberNames: Array<React.JSX.Element>;
+  firstThreeMemberNames: Array<JSX.Element>;
   areWeInGroup: boolean;
   i18n: LocalizerType;
   onOtherMembersClick?: () => void;
-}): React.JSX.Element {
+}): JSX.Element {
   const [member1, member2, member3] = firstThreeMemberNames;
 
   if (areWeInGroup) {
@@ -175,7 +174,7 @@ export function GroupMembersNames({
   memberships,
   invitesCount,
   onOtherMembersClick,
-}: PropsType): React.JSX.Element {
+}: PropsType): JSX.Element {
   const areWeInGroup = useMemo(() => {
     return memberships.some(({ member }) => member.isMe);
   }, [memberships]);
@@ -204,9 +203,9 @@ export function GroupMembersNames({
     ).map((name, i) => (
       // We cannot guarantee uniqueness of member names
       // oxlint-disable-next-line react/no-array-index-key
-      <strong key={i} className={nameClassName}>
+      <span key={i} className={nameClassName}>
         <UserText text={name ?? i18n('icu:unknownContactShort')} />
-      </strong>
+      </span>
     ));
   }, [otherMemberNames, nameClassName, i18n]);
 

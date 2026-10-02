@@ -25,6 +25,7 @@ export function callingMessageToProto(
   let opaqueField: undefined | Proto.CallMessage.Opaque.Params;
   if (opaque) {
     opaqueField = {
+      // oxlint-disable-next-line typescript/no-misused-spread
       ...opaque,
       urgency: null,
       data: opaque.data != null ? opaqueToBytes(opaque.data) : null,
@@ -40,14 +41,16 @@ export function callingMessageToProto(
   return {
     offer: offer
       ? {
+          // oxlint-disable-next-line typescript/no-misused-spread
           ...offer,
           id: offer.callId,
-          type: offer.type as number,
+          type: offer.type as unknown as Proto.CallMessage.Offer.Type,
           opaque: opaqueToBytes(offer.opaque),
         }
       : null,
     answer: answer
       ? {
+          // oxlint-disable-next-line typescript/no-misused-spread
           ...answer,
           id: answer.callId,
           opaque: opaqueToBytes(answer.opaque),
@@ -56,6 +59,7 @@ export function callingMessageToProto(
     iceUpdate: iceCandidates
       ? iceCandidates.map((candidate): Proto.CallMessage.IceUpdate.Params => {
           return {
+            // oxlint-disable-next-line typescript/no-misused-spread
             ...candidate,
             id: candidate.callId,
             opaque: opaqueToBytes(candidate.opaque),
@@ -64,15 +68,17 @@ export function callingMessageToProto(
       : null,
     busy: busy
       ? {
+          // oxlint-disable-next-line typescript/no-misused-spread
           ...busy,
           id: busy.callId,
         }
       : null,
     hangup: hangup
       ? {
+          // oxlint-disable-next-line typescript/no-misused-spread
           ...hangup,
           id: hangup.callId,
-          type: hangup.type as number,
+          type: hangup.type as unknown as Proto.CallMessage.Hangup.Type,
         }
       : null,
     destinationDeviceId: destinationDeviceId ?? null,
@@ -83,7 +89,6 @@ export function callingMessageToProto(
 function opaqueToBytes(
   opaque: AnswerMessage['opaque']
 ): Uint8Array<ArrayBuffer> {
-  // @ts-expect-error needs ringrtc update
   const bytes: Uint8Array<ArrayBuffer> = opaque;
   return bytes;
 }

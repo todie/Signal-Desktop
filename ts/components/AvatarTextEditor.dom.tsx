@@ -1,14 +1,8 @@
 // Copyright 2021 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import type { ChangeEvent, ClipboardEvent } from 'react';
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import type { ChangeEvent, ClipboardEvent, JSX } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import lodash from 'lodash';
 
 import * as grapheme from '../util/grapheme.std.ts';
@@ -24,6 +18,7 @@ import {
   getFittedFontSize,
   getFontSizes,
 } from '../util/avatarTextSizeCalculator.std.ts';
+import { AxoDialog } from '../axo/AxoDialog.dom.tsx';
 
 const { noop } = lodash;
 
@@ -35,6 +30,7 @@ type DoneHandleType = (
 export type PropsType = {
   avatarData?: AvatarDataType;
   i18n: LocalizerType;
+  isInsideDialog: boolean;
   onCancel: () => unknown;
   onDone: DoneHandleType;
 };
@@ -45,9 +41,10 @@ const MAX_LENGTH = 3;
 export function AvatarTextEditor({
   avatarData,
   i18n,
+  isInsideDialog,
   onCancel,
   onDone,
-}: PropsType): React.JSX.Element {
+}: PropsType): JSX.Element {
   const initialText = useMemo(() => avatarData?.text || '', [avatarData]);
   const initialColor = useMemo(
     () => avatarData?.color || AvatarColors[0],
@@ -153,7 +150,7 @@ export function AvatarTextEditor({
   const hasChanges =
     initialText !== inputText || selectedColor !== initialColor;
 
-  return (
+  const body = (
     <>
       <div className="AvatarEditor__preview">
         <BetterAvatarBubble
@@ -186,15 +183,35 @@ export function AvatarTextEditor({
         }}
         selectedColor={selectedColor}
       />
-      <AvatarModalButtons
-        hasChanges={hasChanges}
-        i18n={i18n}
-        onCancel={onCancel}
-        onSave={handleDone}
-      />
       <div className="AvatarTextEditor__measure" ref={measureElRef}>
         {inputText}
       </div>
+    </>
+  );
+
+  const footer = (
+    <AvatarModalButtons
+      isInsideDialog={isInsideDialog}
+      hasChanges={hasChanges}
+      i18n={i18n}
+      onCancel={onCancel}
+      onSave={handleDone}
+    />
+  );
+
+  if (isInsideDialog) {
+    return (
+      <>
+        <AxoDialog.Body forceMaxHeight>{body}</AxoDialog.Body>
+        <AxoDialog.Footer>{footer}</AxoDialog.Footer>
+      </>
+    );
+  }
+
+  return (
+    <>
+      {body}
+      {footer}
     </>
   );
 }

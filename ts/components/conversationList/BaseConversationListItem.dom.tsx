@@ -1,8 +1,8 @@
 // Copyright 2021 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import type { ReactNode, FunctionComponent } from 'react';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import type { ReactNode, FunctionComponent, JSX } from 'react';
+import { useCallback, useEffect, useMemo, useState, memo } from 'react';
 import classNames from 'classnames';
 import lodash from 'lodash';
 import { v4 as generateUuid } from 'uuid';
@@ -27,7 +27,7 @@ const CONTENT_CLASS_NAME = `${BASE_CLASS_NAME}__content`;
 const HEADER_CLASS_NAME = `${CONTENT_CLASS_NAME}__header`;
 export const HEADER_NAME_CLASS_NAME = `${HEADER_CLASS_NAME}__name`;
 export const HEADER_CONTACT_NAME_CLASS_NAME = `${HEADER_NAME_CLASS_NAME}__contact-name`;
-export const DATE_CLASS_NAME = `${HEADER_CLASS_NAME}__date`;
+const DATE_CLASS_NAME = `${HEADER_CLASS_NAME}__date`;
 const MESSAGE_CLASS_NAME = `${CONTENT_CLASS_NAME}__message`;
 export const MESSAGE_TEXT_CLASS_NAME = `${MESSAGE_CLASS_NAME}__text`;
 const CHECKBOX_CONTAINER_CLASS_NAME = `${BASE_CLASS_NAME}__checkbox--container`;
@@ -65,7 +65,7 @@ type PropsType = {
   testId?: string;
   renderConversationListItemContextMenu?: (
     props: RenderConversationListItemContextMenuProps
-  ) => React.JSX.Element;
+  ) => JSX.Element;
 } & Pick<
   ConversationType,
   | 'avatarPlaceholderGradient'
@@ -85,8 +85,8 @@ type PropsType = {
     | { badge: BadgeType; theme: ThemeType }
   );
 
-export const BaseConversationListItem: FunctionComponent<PropsType> =
-  React.memo(function BaseConversationListItem(props) {
+export const BaseConversationListItem: FunctionComponent<PropsType> = memo(
+  function BaseConversationListItem(props) {
     const {
       avatarPlaceholderGradient,
       avatarUrl,
@@ -128,9 +128,7 @@ export const BaseConversationListItem: FunctionComponent<PropsType> =
     const testId = overrideTestId || groupId || serviceId;
     const isUnread = isConversationUnread({ markedUnread, unreadCount });
 
-    const isAvatarNoteToSelf = isBoolean(isNoteToSelf)
-      ? isNoteToSelf
-      : Boolean(isMe);
+    const isAvatarNoteToSelf = isBoolean(isNoteToSelf) ? isNoteToSelf : isMe;
 
     const isCheckbox = isBoolean(checked);
 
@@ -281,7 +279,7 @@ export const BaseConversationListItem: FunctionComponent<PropsType> =
       );
     }
 
-    let wrapper: React.JSX.Element;
+    let wrapper: JSX.Element;
 
     if (onClick) {
       wrapper = (
@@ -326,7 +324,8 @@ export const BaseConversationListItem: FunctionComponent<PropsType> =
     }
 
     return wrapper;
-  });
+  }
+);
 
 function Timestamp({
   i18n,
@@ -376,7 +375,7 @@ type UnreadIndicatorPropsType =
   | { variant: UnreadIndicatorVariant.UNREAD_MENTIONS };
 
 function UnreadIndicator(props: UnreadIndicatorPropsType) {
-  let content: React.ReactNode;
+  let content: ReactNode;
 
   switch (props.variant) {
     case UnreadIndicatorVariant.MARKED_UNREAD:

@@ -1,7 +1,7 @@
 // Copyright 2018 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import React, { useMemo } from 'react';
+import { useMemo, type JSX } from 'react';
 
 import { CurveType, Image } from './Image.dom.tsx';
 import { StagedGenericAttachment } from './StagedGenericAttachment.dom.tsx';
@@ -13,7 +13,7 @@ import type {
 } from '../../types/Attachment.std.ts';
 import {
   areAllAttachmentsVisual,
-  canDisplayImage,
+  areDimensionsDisplayable,
   isImageAttachment,
   isVideoAttachment,
 } from '../../util/Attachment.std.ts';
@@ -60,7 +60,7 @@ export function AttachmentList<
   onClickAttachment,
   onCloseAttachment,
   onClose,
-}: Props<T>): React.JSX.Element | null {
+}: Props<T>): JSX.Element | null {
   const attachmentsForUI = useMemo(() => {
     return attachments.map((attachment: T): AttachmentForUIType => {
       // Already ForUI attachment
@@ -80,7 +80,7 @@ export function AttachmentList<
     return null;
   }
 
-  const allVisualAttachments = areAllAttachmentsVisual(attachments);
+  const allVisualAttachments = areAllAttachmentsVisual(attachmentsForUI);
 
   return (
     <div className="module-attachments">
@@ -107,12 +107,12 @@ export function AttachmentList<
             attachment.fileName ||
             index;
 
-          const isImage = isImageAttachment(attachment);
-          const isVideo = isVideoAttachment(attachment);
+          const isImage = isImageAttachment(forUI);
+          const isVideo = isVideoAttachment(forUI);
           const closeAttachment = () => onCloseAttachment(attachment);
 
           if (
-            (isImage && canDisplayImage([attachment])) ||
+            (isImage && areDimensionsDisplayable(forUI)) ||
             isVideo ||
             attachment.pending
           ) {
@@ -162,7 +162,7 @@ export function AttachmentList<
           return (
             <StagedGenericAttachment
               key={key}
-              attachment={attachment}
+              attachment={forUI}
               i18n={i18n}
               onClose={closeAttachment}
             />

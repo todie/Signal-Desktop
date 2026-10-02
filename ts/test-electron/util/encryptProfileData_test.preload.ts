@@ -11,8 +11,9 @@ import {
   decryptProfile,
 } from '../../Crypto.node.ts';
 import type { ConversationType } from '../../state/ducks/conversations.preload.ts';
-import { generateAci } from '../../types/ServiceId.std.ts';
 import { encryptProfileData } from '../../util/encryptProfileData.preload.ts';
+import { generateAci } from '../../test-helpers/serviceIdUtils.std.ts';
+import { Emoji } from '../../axo/emoji.std.ts';
 
 describe('encryptProfileData', () => {
   let keyBuffer: Uint8Array<ArrayBuffer>;
@@ -21,7 +22,7 @@ describe('encryptProfileData', () => {
   beforeEach(() => {
     keyBuffer = getRandomBytes(32);
     conversation = {
-      aboutEmoji: '🐢',
+      aboutEmoji: Emoji.TURTLE,
       aboutText: 'I like turtles',
       familyName: 'Kid',
       firstName: 'Zombie',
@@ -79,7 +80,7 @@ describe('encryptProfileData', () => {
     }
 
     if (encrypted.aboutEmoji) {
-      const decryptedAboutEmojiBytes = await decryptProfile(
+      const decryptedAboutEmojiBytes = decryptProfile(
         Bytes.fromBase64(encrypted.aboutEmoji),
         keyBuffer
       );

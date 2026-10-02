@@ -17,12 +17,14 @@ const removeStorageKeyJobDataSchema = z.object({
     'nextSignedKeyRotationTime',
     'senderCertificateWithUuid',
     'signedKeyRotationRejected',
+    'isDirectVp9Enabled',
+    'isGroupVp9Enabled',
   ]),
 });
 
 type RemoveStorageKeyJobData = z.infer<typeof removeStorageKeyJobDataSchema>;
 
-export class RemoveStorageKeyJobQueue extends JobQueue<RemoveStorageKeyJobData> {
+class RemoveStorageKeyJobQueue extends JobQueue<RemoveStorageKeyJobData> {
   protected parseData(data: unknown): RemoveStorageKeyJobData {
     return parseUnknown(removeStorageKeyJobDataSchema, data);
   }

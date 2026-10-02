@@ -137,6 +137,8 @@ import { toNumber } from './util/toNumber.std.ts';
 import Actions = Proto.GroupChange.Actions;
 import AccessRequired = Proto.AccessControl.AccessRequired;
 import MemberRole = Proto.Member.Role;
+import { computeGroupNameHash } from './util/Conversation.preload.ts';
+import { Emoji } from './axo/emoji.std.ts';
 
 const { compact, difference, flatten, fromPairs, isNumber, omit, values } =
   lodash;
@@ -274,6 +276,7 @@ export async function getPreJoinGroupInfo(
   const data = deriveGroupFields(Bytes.fromBase64(masterKeyBase64));
 
   return makeRequestWithCredentials({
+    // oxlint-disable-next-line typescript/restrict-template-expressions
     logId: `getPreJoinInfo/groupv2(${data.id})`,
     publicParams: Bytes.toBase64(data.publicParams),
     secretParams: Bytes.toBase64(data.secretParams),
@@ -1323,7 +1326,7 @@ export function buildModifyMemberLabelChange({
 }: {
   serviceId: ServiceIdString;
   group: ConversationAttributesType;
-  labelEmoji: string | undefined;
+  labelEmoji: Emoji.Variant | undefined;
   labelString: string | undefined;
 }): Actions.Params {
   const logId = `buildModifyMemberLabelChange(${getConversationIdForLogging(group)})`;
@@ -1423,7 +1426,7 @@ export function buildPromoteMemberChange({
   group,
   profileKeyCredentialBase64,
   serverPublicParamsBase64,
-  isPendingPniAciProfileKey = false,
+  isPendingPniAciProfileKey,
 }: BuildPromoteMemberChangeOptionsType): Actions.Params {
   if (!group.secretParams) {
     throw new Error(
@@ -1550,7 +1553,9 @@ export async function modifyGroupV2({
         );
 
         if (logIds.length !== 0) {
-          log.info(`modifyGroupV2/${logId}: Fetching profiles for ${logIds}`);
+          log.info(
+            `modifyGroupV2/${logId}: Fetching profiles for ${logIds.join(', ')}`
+          );
         }
 
         // oxlint-disable-next-line no-await-in-loop
@@ -1676,7 +1681,7 @@ export async function modifyGroupV2({
         if (logIds.length !== 0) {
           log.warn(
             `modifyGroupV2/${logId}: Profile key credentials were not ` +
-              `up-to-date. Updating profiles for ${logIds} and retrying`
+              `up-to-date. Updating profiles for ${logIds.join(', ')} and retrying`
           );
         }
 
@@ -1991,7 +1996,7 @@ export async function createGroupV2(
 
     log.warn(
       `createGroupV2/${logId}: Profile key credentials were not ` +
-        `up-to-date. Updating profiles for ${logIds} and retrying`
+        `up-to-date. Updating profiles for ${logIds.join(', ')} and retrying`
     );
 
     return createGroupV2({
@@ -2027,6 +2032,7 @@ export async function createGroupV2(
       avatar: avatarAttribute,
       avatars,
       groupVersion: 2,
+      groupVerifiedNameHash: computeGroupNameHash(name),
       masterKey,
       profileSharing: true,
       timestamp: now,
@@ -2156,7 +2162,7 @@ type MigratePropsType = Readonly<{
   groupChange?: WrappedGroupChangeType;
 }>;
 
-export async function isGroupEligibleToMigrate(
+async function isGroupEligibleToMigrate(
   conversation: ConversationModel
 ): Promise<boolean> {
   if (!getIsGroupV1(conversation.attributes)) {
@@ -2512,7 +2518,7 @@ export async function initiateMigrationToGroupV2(
       });
 
       if (itemStorage.blocked.isGroupBlocked(previousGroupV1Id)) {
-        await itemStorage.blocked.addBlockedGroup(groupId);
+        await itemStorage.blocked.addBlockedGroup(groupId, undefined);
       }
 
       // Save these most recent updates to conversation
@@ -2594,12 +2600,12 @@ export async function waitThenRespondToGroupV2Migration(
   });
 }
 
-export function buildMigrationBubble(
+function buildMigrationBubble(
   previousGroupV1MembersIds: ReadonlyArray<string>,
   newAttributes: ConversationAttributesType
 ): GroupChangeMessageType {
   const ourAci = itemStorage.user.getCheckedAci();
-  const ourPni = itemStorage.user.getPni();
+  const ourPni = itemStorage.user.getOptionalPni();
   const ourConversationId =
     window.ConversationController.getOurConversationId();
 
@@ -2639,7 +2645,7 @@ export function buildMigrationBubble(
   };
 }
 
-export function getBasicMigrationBubble(): GroupChangeMessageType {
+function getBasicMigrationBubble(): GroupChangeMessageType {
   return {
     type: 'group-v1-migration',
     groupMigration: {
@@ -2856,14 +2862,14 @@ export async function respondToGroupV2Migration({
           );
 
           if (itemStorage.blocked.isGroupBlocked(previousGroupV1Id)) {
-            await itemStorage.blocked.addBlockedGroup(groupId);
+            await itemStorage.blocked.addBlockedGroup(groupId, undefined);
           }
 
           if (wereWePreviouslyAMember) {
             log.info(
               `respondToGroupV2Migration/${logId}: Upgrading group with migration/removed events`
             );
-            const ourNumber = itemStorage.user.getNumber();
+            const ourNumber = itemStorage.user.getOptionalNumber();
             await updateGroup({
               conversation,
               receivedAt,
@@ -2875,7 +2881,9 @@ export async function respondToGroupV2Migration({
                   addedBy: undefined,
                   left: true,
                   members: (conversation.get('members') || []).filter(
-                    item => item !== ourAci && item !== ourNumber
+                    item =>
+                      item !== ourAci &&
+                      (ourNumber == null || item !== ourNumber)
                   ),
                 },
                 groupChangeMessages: [
@@ -2995,7 +3003,7 @@ export async function respondToGroupV2Migration({
   });
 
   if (itemStorage.blocked.isGroupBlocked(previousGroupV1Id)) {
-    await itemStorage.blocked.addBlockedGroup(groupId);
+    await itemStorage.blocked.addBlockedGroup(groupId, undefined);
   }
 
   // Save these most recent updates to conversation
@@ -3039,6 +3047,7 @@ type MaybeUpdatePropsType = Readonly<{
   newRevision?: number;
   receivedAt?: number;
   sentAt?: number;
+  serverGuid?: string;
   dropInitialJoinMessage?: boolean;
   force?: boolean;
   groupChange?: WrappedGroupChangeType;
@@ -3099,6 +3108,7 @@ export async function maybeUpdateGroup(
     newRevision,
     receivedAt,
     sentAt,
+    serverGuid,
   }: MaybeUpdatePropsType,
   { viaFirstStorageSync = false } = {}
 ): Promise<void> {
@@ -3117,7 +3127,7 @@ export async function maybeUpdateGroup(
     });
 
     await updateGroup(
-      { conversation, receivedAt, sentAt, updates },
+      { conversation, receivedAt, sentAt, serverGuid, updates },
       { viaFirstStorageSync }
     );
   } catch (error) {
@@ -3144,11 +3154,13 @@ async function updateGroup(
     conversation,
     receivedAt,
     sentAt,
+    serverGuid,
     updates,
   }: {
     conversation: ConversationModel;
     receivedAt?: number;
     sentAt?: number;
+    serverGuid?: string;
     updates: UpdatesResultType;
   },
   { viaFirstStorageSync = false } = {}
@@ -3157,7 +3169,7 @@ async function updateGroup(
 
   const { newAttributes, groupChangeMessages, newProfileKeys } = updates;
   const ourAci = itemStorage.user.getCheckedAci();
-  const ourPni = itemStorage.user.getPni();
+  const ourPni = itemStorage.user.getOptionalPni();
 
   const wasMemberOrPending =
     conversation.hasMember(ourAci) ||
@@ -3166,7 +3178,7 @@ async function updateGroup(
   const isMemberOrPending =
     !newAttributes.left ||
     newAttributes.pendingMembersV2?.some(
-      item => item.serviceId === ourAci || item.serviceId === ourPni
+      item => item.serviceId === ourAci || (ourPni && item.serviceId === ourPni)
     );
 
   // Ensure that all generated messages are ordered properly.
@@ -3208,13 +3220,14 @@ async function updateGroup(
       conversationId: conversation.id,
       received_at_ms: syntheticSentAt,
       sent_at: syntheticSentAt,
+      serverGuid,
       timestamp,
     };
   });
 
-  const contactsWithoutProfileKey = new Array<ConversationModel>();
+  const contactsNeedingFetch = new Array<ConversationModel>();
 
-  // Capture profile key for each member in the group, if we don't have it yet
+  // Update profile key for each member, if self-updated or we have no profileKey for them
   for (const [aci, profileKey] of newProfileKeys) {
     const contact = window.ConversationController.getOrCreate(aci, 'private');
 
@@ -3224,20 +3237,20 @@ async function updateGroup(
       profileKey.length > 0 &&
       contact.get('profileKey') !== profileKey
     ) {
-      contactsWithoutProfileKey.push(contact);
+      contactsNeedingFetch.push(contact);
       drop(contact.setProfileKey(profileKey, { reason: 'updateGroup' }));
     }
   }
 
   let profileFetches: Promise<Array<void>> | undefined;
-  if (contactsWithoutProfileKey.length !== 0) {
+  if (contactsNeedingFetch.length !== 0) {
     log.info(
       `updateGroup/${logId}: fetching ` +
-        `${contactsWithoutProfileKey.length} missing profiles`
+        `${contactsNeedingFetch.length} missing profiles`
     );
 
     profileFetches = Promise.all(
-      contactsWithoutProfileKey.map(contact => {
+      contactsNeedingFetch.map(contact => {
         return getProfile({
           serviceId: contact.getServiceId() ?? null,
           e164: contact.get('e164') ?? null,
@@ -3251,7 +3264,7 @@ async function updateGroup(
   const justAdded = !wasMemberOrPending && isMemberOrPending;
   const addedBy =
     newAttributes.pendingMembersV2?.find(
-      item => item.serviceId === ourAci || item.serviceId === ourPni
+      item => item.serviceId === ourAci || (ourPni && item.serviceId === ourPni)
     )?.addedByUserId || newAttributes.addedBy;
 
   if (justAdded) {
@@ -3315,10 +3328,10 @@ async function updateGroup(
   //   the group updates happen on the model.
   if (changeMessagesToSave.length > 0) {
     try {
-      if (contactsWithoutProfileKey && contactsWithoutProfileKey.length > 0) {
+      if (contactsNeedingFetch && contactsNeedingFetch.length > 0) {
         await Promise.race([profileFetches, sleep(30 * SECOND)]);
         log.info(
-          `updateGroup/${logId}: timed out or finished fetching ${contactsWithoutProfileKey.length} profiles`
+          `updateGroup/${logId}: timed out or finished fetching ${contactsNeedingFetch.length} profiles`
         );
       }
     } catch (error) {
@@ -3333,6 +3346,10 @@ async function updateGroup(
   conversation.set({
     ...omit(newAttributes, FIELDS_UNRELATED_TO_GROUP_STATE),
     active_at: activeAt,
+
+    // Reset `needsGroupUpdate` so that group can be synced to storage service
+    // after the first fetch.
+    needsGroupUpdate: undefined,
   });
 
   if (idChanged) {
@@ -4199,7 +4216,7 @@ async function generateLeftGroupChanges(
   const logId = idForLogging(group.groupId);
   log.info(`generateLeftGroupChanges/${logId}: Starting...`);
   const ourAci = itemStorage.user.getCheckedAci();
-  const ourPni = itemStorage.user.getCheckedPni();
+  const ourPni = itemStorage.user.getOptionalPni();
 
   const { masterKey, groupInviteLinkPassword } = group;
   let { revision } = group;
@@ -4228,7 +4245,8 @@ async function generateLeftGroupChanges(
     addedBy: undefined,
     membersV2: (group.membersV2 || []).filter(member => member.aci !== ourAci),
     pendingMembersV2: (group.pendingMembersV2 || []).filter(
-      member => member.serviceId !== ourAci && member.serviceId !== ourPni
+      member =>
+        member.serviceId !== ourAci && (!ourPni || member.serviceId !== ourPni)
     ),
     pendingAdminApprovalV2: (group.pendingAdminApprovalV2 || []).filter(
       member => member.aci !== ourAci
@@ -4621,7 +4639,7 @@ function extractDiffs({
   const logId = idForLogging(old.groupId);
   const details: Array<GroupV2ChangeDetailType> = [];
   const ourAci = itemStorage.user.getCheckedAci();
-  const ourPni = itemStorage.user.getPni();
+  const ourPni = itemStorage.user.getOptionalPni();
   const ACCESS_ENUM = Proto.AccessControl.AccessRequired;
 
   let areWeInGroup = false;
@@ -4630,7 +4648,7 @@ function extractDiffs({
   let whoInvitedUsUserId = null;
 
   function isUs(serviceId: ServiceIdString): boolean {
-    return serviceId === ourAci || serviceId === ourPni;
+    return serviceId === ourAci || (ourPni != null && serviceId === ourPni);
   }
   function keepOnlyOurAdds(
     list: Array<GroupV2ChangeDetailType>
@@ -4763,7 +4781,7 @@ function extractDiffs({
   const oldMemberLookup = new Map<AciString, GroupV2MemberType>(
     (old.membersV2 || []).map(member => [member.aci, member])
   );
-  const didWeStartInGroup = Boolean(ourAci && oldMemberLookup.has(ourAci));
+  const didWeStartInGroup = oldMemberLookup.has(ourAci);
 
   const oldPendingMemberLookup = new Map<
     ServiceIdString,
@@ -5535,6 +5553,13 @@ async function applyGroupChange({
     const title = actions.modifyTitle.title?.content?.title;
     if (title != null) {
       result.name = title.trim();
+      if (ourAci === sourceServiceId) {
+        result.groupVerifiedNameHash = computeGroupNameHash(result.name);
+        // TODO (DESKTOP-10060)
+        window.ConversationController.get(group.id)?.captureChange(
+          'groupVerifiedNameHash'
+        );
+      }
     } else {
       log.warn(
         `applyGroupChange/${logId}: Clearing group title due to missing data.`
@@ -5630,7 +5655,7 @@ async function applyGroupChange({
       const { added } = addMemberPendingAdminApproval;
       if (!added) {
         throw new Error(
-          'applyGroupChange: modifyMemberProfileKey had a missing value'
+          'applyGroupChange: addMemberPendingAdminApproval had a missing value'
         );
       }
 
@@ -5828,6 +5853,7 @@ export async function decryptGroupAvatar(
 
   if (blob.content?.avatar == null) {
     throw new Error(
+      // oxlint-disable-next-line typescript/no-base-to-string, typescript/restrict-template-expressions
       `decryptGroupAvatar: Returned blob had incorrect content: ${blob.content}`
     );
   }
@@ -6032,8 +6058,8 @@ async function applyGroupState({
   const ourAci = itemStorage.user.getCheckedAci();
 
   // members
-  const wasPreviouslyAMember = (result.membersV2 || []).some(
-    item => item.aci !== ourAci
+  const wasPreviouslyAMember = (group.membersV2 || []).some(
+    item => item.aci === ourAci
   );
   if (groupState.members) {
     result.membersV2 = groupState.members.map(member => {
@@ -6230,6 +6256,10 @@ async function applyGroupState({
     return member;
   });
 
+  if (groupState.version === 0 && sourceServiceId === ourAci && result.name) {
+    result.groupVerifiedNameHash = computeGroupNameHash(result.name);
+  }
+
   // avatar
   result = {
     ...result,
@@ -6310,7 +6340,7 @@ function normalizeTimestamp(timestamp: bigint | null | undefined): number {
 
 type DecryptedModifyMemberLabelAction = {
   userId: AciString;
-  labelEmoji?: string;
+  labelEmoji?: Emoji.Variant;
   labelString?: string;
 };
 
@@ -6448,7 +6478,7 @@ function decryptGroupChange(
 
       return {
         added: decrypted,
-        joinFromInviteLink: Boolean(addMember.joinFromInviteLink),
+        joinFromInviteLink: addMember.joinFromInviteLink,
       };
     })
   );
@@ -7001,7 +7031,7 @@ function decryptGroupChange(
   if (actions.modifyAnnouncementsOnly) {
     const { announcementsOnly } = actions.modifyAnnouncementsOnly;
     result.modifyAnnouncementsOnly = {
-      announcementsOnly: Boolean(announcementsOnly),
+      announcementsOnly,
     };
   }
 
@@ -7105,11 +7135,11 @@ function decryptModifyMemberLabelAction(
   }
 
   // labelEmoji
-  let decryptedLabelEmoji: string | undefined;
+  let decryptedLabelEmoji: Emoji.Variant | undefined;
   if (Bytes.isNotEmpty(labelEmoji)) {
     try {
-      decryptedLabelEmoji = Bytes.toString(
-        decryptGroupBlob(clientZkGroupCipher, labelEmoji)
+      decryptedLabelEmoji = Emoji.unsafeCastMaybeInvalidStringToVariant(
+        Bytes.toString(decryptGroupBlob(clientZkGroupCipher, labelEmoji))
       );
     } catch (error) {
       log.warn(
@@ -7342,7 +7372,7 @@ type DecryptedMember = Readonly<{
   profileKey: Uint8Array<ArrayBuffer>;
   role: MemberRole;
   joinedAtVersion: number;
-  labelEmoji?: string;
+  labelEmoji?: Emoji.Variant;
   labelString?: string;
 }>;
 
@@ -7391,11 +7421,11 @@ function decryptMember(
   }
 
   // labelEmoji
-  let decryptedLabelEmoji: string | undefined;
+  let decryptedLabelEmoji: Emoji.Variant | undefined;
   if (Bytes.isNotEmpty(member.labelEmoji)) {
     try {
-      decryptedLabelEmoji = Bytes.toString(
-        decryptGroupBlob(clientZkGroupCipher, member.labelEmoji)
+      decryptedLabelEmoji = Emoji.unsafeCastMaybeInvalidStringToVariant(
+        Bytes.toString(decryptGroupBlob(clientZkGroupCipher, member.labelEmoji))
       );
     } catch (error) {
       log.warn(

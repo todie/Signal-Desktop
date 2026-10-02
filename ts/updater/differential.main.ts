@@ -97,9 +97,7 @@ export function getBlockMapFileName(fileName: string): string {
   return `${fileName}.blockmap`;
 }
 
-export async function parseBlockMap(
-  data: Buffer<ArrayBuffer>
-): Promise<BlockMapType> {
+async function parseBlockMap(data: Buffer<ArrayBuffer>): Promise<BlockMapType> {
   const unpacked = await gunzip(data);
   const json: BlockMapFileJSONType = JSON.parse(unpacked.toString());
 
@@ -329,7 +327,7 @@ export async function download(
   strictAssert(checkResult.ok, checkResult.error ?? '');
 }
 
-export async function downloadRanges(
+async function downloadRanges(
   options: DownloadRangesOptionsType
 ): Promise<void> {
   const { ranges } = options;
@@ -476,7 +474,7 @@ async function takeDiffFromPart(
     | null;
   strictAssert(
     match,
-    `Invalid Content-Range header for the part: "${contentRange}"`
+    `Invalid Content-Range header for the part: "${contentRange.join(', ')}"`
   );
 
   const range = match[1];

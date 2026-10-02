@@ -1,7 +1,7 @@
 // Copyright 2022 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import React, { forwardRef, useEffect, useRef, useState } from 'react';
+import { forwardRef, useEffect, useRef, useState, type JSX } from 'react';
 import classNames from 'classnames';
 
 import type {
@@ -121,7 +121,7 @@ export const TextAttachment = forwardRef<HTMLTextAreaElement, PropsType>(
       textAttachment,
     },
     forwardedTextEditorRef
-  ): React.JSX.Element | null {
+  ): JSX.Element | null {
     const linkPreview = useRef<HTMLDivElement | null>(null);
     const [linkPreviewOffsetTop, setLinkPreviewOffsetTop] = useState<
       number | undefined
@@ -139,11 +139,18 @@ export const TextAttachment = forwardRef<HTMLTextAreaElement, PropsType>(
 
       node.focus();
       node.setSelectionRange(node.value.length, node.value.length);
-    }, [isEditingText]);
+    }, [
+      // oxlint-disable-next-line react/exhaustive-effect-dependencies
+      isEditingText,
+    ]);
 
     useEffect(() => {
+      // oxlint-disable-next-line react/set-state-in-effect
       setLinkPreviewOffsetTop(undefined);
-    }, [textAttachment.preview?.url]);
+    }, [
+      // oxlint-disable-next-line react/exhaustive-effect-dependencies
+      textAttachment.preview?.url,
+    ]);
 
     const [isHoveringOverTooltip, setIsHoveringOverTooltip] = useState(false);
 
@@ -297,7 +304,7 @@ export const TextAttachment = forwardRef<HTMLTextAreaElement, PropsType>(
               )}
               <StoryLinkPreview
                 {...textAttachment.preview}
-                domain={getSafeDomain(String(textAttachment.preview.url))}
+                domain={getSafeDomain(textAttachment.preview.url)}
                 forceCompactMode={getTextSize(textContent) !== TextSize.Large}
                 i18n={i18n}
                 title={textAttachment.preview.title || undefined}

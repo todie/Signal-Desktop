@@ -41,10 +41,10 @@ type ServerType = Readonly<{
 export class SenderCertificateService {
   #server?: ServerType;
 
-  #fetchPromises: Map<
+  readonly #fetchPromises = new Map<
     SenderCertificateMode,
     Promise<undefined | SerializedCertificateType>
-  > = new Map();
+  >();
 
   #events?: Pick<typeof window.Whisper.events, 'on' | 'off'>;
   #storage?: StorageInterface;
@@ -195,6 +195,14 @@ export class SenderCertificateService {
           mode
         )} certificate from the server that was already expired (or was invalid). Is your system clock off?`
       );
+      return undefined;
+    }
+
+    if (
+      mode === SenderCertificateMode.WithoutE164 &&
+      decodedCert.senderE164() != null
+    ) {
+      log.error('Sender certificate included E164 incorrectly');
       return undefined;
     }
 

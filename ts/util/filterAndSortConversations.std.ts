@@ -1,11 +1,11 @@
 // Copyright 2021 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
-
-import type Fuse from 'fuse.js';
+import Fuse from 'fuse.js';
+import type { FuseOptionKey, FuseResult, IFuseOptions } from 'fuse.js';
 import type { ConversationType } from '../state/ducks/conversations.preload.ts';
 import { parseAndFormatPhoneNumber } from './libphonenumberInstance.std.ts';
 import { WEEK } from './durations/index.std.ts';
-import { fuseGetFnRemoveDiacritics, getCachedFuseIndex } from './fuse.std.ts';
+import { getCachedFuseIndex } from './fuse.std.ts';
 import type { UnreadStatsIncludeMuted } from './countUnreadStats.std.ts';
 import { isConversationUnread } from './countUnreadStats.std.ts';
 import { getE164 } from './getE164.std.ts';
@@ -18,7 +18,15 @@ const ACTIVE_AT_SCORE_FACTOR = (1 / WEEK) * 0.01;
 const ARCHIVED_PENALTY = 0.3;
 const LEFT_GROUP_PENALTY = 1;
 
-const FUSE_OPTIONS: Fuse.IFuseOptions<ConversationType> = {
+function toSearchableTokens(text: string): string {
+  return removeDiacritics(text).replace(/\p{Punctuation}/gu, ' ');
+}
+
+type ConversationTypeFuseOptionKey = FuseOptionKey<ConversationType> & {
+  name: keyof ConversationType;
+};
+
+const FUSE_OPTIONS: IFuseOptions<ConversationType> = {
   // A small-but-nonzero threshold lets us match parts of E164s better, and makes the
   //   search a little more forgiving.
   threshold: 0.2,
@@ -30,37 +38,32 @@ const FUSE_OPTIONS: Fuse.IFuseOptions<ConversationType> = {
   // 200 is about right (contact names can get longer than the max for group titles)
   distance: 200,
   keys: [
-    {
-      name: 'searchableTitle',
-      weight: 1,
-    },
-    {
-      name: 'title',
-      weight: 1,
-    },
-    {
-      name: 'name',
-      weight: 1,
-    },
-    {
-      name: 'profileName',
-      weight: 1,
-    },
-    {
-      name: 'username',
-      weight: 1,
-    },
-    {
-      name: 'e164',
-      weight: 0.5,
-    },
-  ],
+    { name: 'searchableTitle', weight: 1 },
+    { name: 'title', weight: 1 },
+    { name: 'name', weight: 1 },
+    { name: 'profileName', weight: 1 },
+    { name: 'nicknameGivenName', weight: 1 },
+    { name: 'nicknameFamilyName', weight: 1 },
+    { name: 'systemNickname', weight: 1 },
+    { name: 'systemGivenName', weight: 1 },
+    { name: 'systemFamilyName', weight: 1 },
+    { name: 'firstName', weight: 1 },
+    { name: 'familyName', weight: 1 },
+    { name: 'username', weight: 1 },
+    { name: 'e164', weight: 0.5 },
+  ] satisfies ReadonlyArray<ConversationTypeFuseOptionKey>,
   getFn: (convo, path) => {
     if (path === 'e164' || (path.length === 1 && path[0] === 'e164')) {
       return getE164(convo) ?? '';
     }
-
-    return fuseGetFnRemoveDiacritics(convo, path);
+    const text = Fuse.config.getFn(convo, path);
+    if (text == null) {
+      return text;
+    }
+    if (typeof text === 'string') {
+      return toSearchableTokens(text);
+    }
+    return text.map(toSearchableTokens);
   },
 };
 
@@ -123,7 +126,7 @@ function searchConversations(
   conversations: ReadonlyArray<ConversationType>,
   searchTerm: string,
   regionCode: string | undefined
-): ReadonlyArray<Pick<Fuse.FuseResult<ConversationType>, 'item' | 'score'>> {
+): ReadonlyArray<Pick<FuseResult<ConversationType>, 'item' | 'score'>> {
   type CommandMatch = RegExpMatchArray & { 1: string; 2: string | undefined };
   const maybeCommand = searchTerm.match(/^!([^\s:]+)(?::(.*))?$/);
   if (maybeCommand) {
@@ -138,7 +141,7 @@ function searchConversations(
   const phoneNumber = parseAndFormatPhoneNumber(searchTerm, regionCode);
 
   // Escape the search term
-  let extendedSearchTerm = removeDiacritics(searchTerm);
+  let extendedSearchTerm = toSearchableTokens(searchTerm);
 
   // OR phoneNumber
   if (phoneNumber) {
@@ -174,7 +177,7 @@ export function filterAndSortConversations(
   conversations: ReadonlyArray<ConversationType>,
   searchTerm: string,
   regionCode: string | undefined,
-  filterByUnread: boolean = false,
+  filterByUnread = false,
   conversationToInject?: ConversationType
 ): Array<ConversationType> {
   let filteredConversations = filterByUnread

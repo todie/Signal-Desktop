@@ -1,6 +1,8 @@
 // Copyright 2018 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import type { JSX } from 'react';
+
 import type { IntlShape } from 'react-intl';
 import type { AciString } from './ServiceId.std.ts';
 import type { LocaleDirection } from '../../app/locale.node.ts';
@@ -19,9 +21,9 @@ export type StoryContextType = {
 export type RenderTextCallbackType = (options: {
   text: string;
   key: number;
-}) => React.JSX.Element | string;
+}) => JSX.Element | string;
 
-export { ICUJSXMessageParamsByKeyType, ICUStringMessageParamsByKeyType };
+export type { ICUJSXMessageParamsByKeyType, ICUStringMessageParamsByKeyType };
 
 export type LocalizerOptions = {
   /**
@@ -43,15 +45,15 @@ export type LocalizerType = {
           options?: LocalizerOptions,
         ]
   ): string;
-  getIntl(): IntlShape;
-  getLocale(): string;
-  getLocaleMessages(): LocaleMessagesType;
-  getLocaleDirection(): LocaleDirection;
-  getHourCyclePreference(): HourCyclePreference;
+  getIntl: () => IntlShape;
+  getLocale: () => string;
+  getLocaleMessages: () => LocaleMessagesType;
+  getLocaleDirection: () => LocaleDirection;
+  getHourCyclePreference: () => HourCyclePreference;
 
   // Storybook
-  trackUsage(): void;
-  stopTrackingUsage(): Array<[string, string]>;
+  trackUsage: () => void;
+  stopTrackingUsage: () => Array<[string, string]>;
 };
 
 export enum SentMediaQualityType {

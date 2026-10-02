@@ -1,7 +1,7 @@
 // Copyright 2022 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import React, { useState } from 'react';
+import { useState, type JSX } from 'react';
 import type {
   ConversationType,
   ShowConversationType,
@@ -25,12 +25,11 @@ import { NavSidebar, NavSidebarActionButton } from './NavSidebar.dom.tsx';
 import { StoriesAddStoryButton } from './StoriesAddStoryButton.dom.tsx';
 import { I18n } from './I18n.dom.tsx';
 import type { WidthBreakpoint } from './_util.std.ts';
-import type { UnreadStats } from '../util/countUnreadStats.std.ts';
 import { AxoDropdownMenu } from '../axo/AxoDropdownMenu.dom.tsx';
 
 export type PropsType = {
   addStoryData: AddStoryData;
-  otherTabsUnreadStats: UnreadStats;
+  otherTabsUnreadCount: number;
   deleteStoryForEveryone: (story: StoryViewType) => unknown;
   getPreferredBadge: PreferredBadgeSelectorType;
   hasFailedStorySends: boolean;
@@ -51,10 +50,10 @@ export type PropsType = {
   preferredLeftPaneWidth: number;
   preferredWidthFromStorage: number;
   queueStoryDownload: (storyId: string) => unknown;
-  renderStoryCreator: () => React.JSX.Element;
+  renderStoryCreator: () => JSX.Element;
   renderToastManager: (_: {
     containerWidthBreakpoint: WidthBreakpoint;
-  }) => React.JSX.Element;
+  }) => JSX.Element;
   retryMessageSend: (messageId: string) => unknown;
   savePreferredLeftPaneWidth: (preferredLeftPaneWidth: number) => void;
   setAddStoryData: (data: AddStoryData) => unknown;
@@ -70,7 +69,7 @@ export type PropsType = {
 
 export function StoriesTab({
   addStoryData,
-  otherTabsUnreadStats,
+  otherTabsUnreadCount,
   deleteStoryForEveryone,
   getPreferredBadge,
   hasFailedStorySends,
@@ -101,7 +100,7 @@ export function StoriesTab({
   toggleHideStories,
   viewStory,
   viewUserStories,
-}: PropsType): React.JSX.Element {
+}: PropsType): JSX.Element {
   const [isMyStories, setIsMyStories] = useState(false);
 
   function onAddStory(file?: File) {
@@ -117,7 +116,7 @@ export function StoriesTab({
       {addStoryData && renderStoryCreator()}
       {isMyStories && myStories.length ? (
         <MyStories
-          otherTabsUnreadStats={otherTabsUnreadStats}
+          otherTabsUnreadCount={otherTabsUnreadCount}
           hasFailedStorySends={hasFailedStorySends}
           hasPendingUpdate={hasPendingUpdate}
           hasViewReceiptSetting={hasViewReceiptSetting}
@@ -149,7 +148,7 @@ export function StoriesTab({
           preferredLeftPaneWidth={preferredLeftPaneWidth}
           requiresFullWidth
           savePreferredLeftPaneWidth={savePreferredLeftPaneWidth}
-          otherTabsUnreadStats={otherTabsUnreadStats}
+          otherTabsUnreadCount={otherTabsUnreadCount}
           renderToastManager={renderToastManager}
           actions={
             <>

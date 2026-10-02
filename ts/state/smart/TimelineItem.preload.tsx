@@ -1,8 +1,8 @@
 // Copyright 2019 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import type { RefObject } from 'react';
-import React, { useCallback, memo } from 'react';
+import type { RefObject, JSX } from 'react';
+import { useCallback, memo } from 'react';
 import { useSelector } from 'react-redux';
 
 import { TimelineItem } from '../../components/conversation/TimelineItem.dom.tsx';
@@ -15,12 +15,7 @@ import { useLightboxActions } from '../ducks/lightbox.preload.ts';
 import { useStoriesActions } from '../ducks/stories.preload.ts';
 import { useCallingActions } from '../ducks/calling.preload.ts';
 import { getPreferredBadgeSelector } from '../selectors/badges.preload.ts';
-import {
-  getIntl,
-  getInteractionMode,
-  getTheme,
-  getPlatform,
-} from '../selectors/user.std.ts';
+import { getIntl, getTheme, getPlatform } from '../selectors/user.std.ts';
 import {
   getSelectedMessageIds,
   getTargetedMessage,
@@ -47,6 +42,7 @@ import { useNavActions } from '../ducks/nav.std.ts';
 import { DataReader } from '../../sql/Client.preload.ts';
 import { isInternalFeaturesEnabled } from '../../util/isInternalFeaturesEnabled.dom.ts';
 import type { CollapseSet } from '../../util/CollapseSet.std.ts';
+import { isSignalConversation } from '../../util/isSignalConversation.dom.ts';
 
 export type RenderItemProps = Omit<SmartTimelineItemProps, 'renderItem'>;
 
@@ -61,20 +57,20 @@ export type SmartTimelineItemProps = {
   item: CollapseSet;
   nextMessageId: undefined | string;
   previousMessageId: undefined | string;
-  renderItem: (props: RenderItemProps) => React.JSX.Element;
+  renderItem: (props: RenderItemProps) => JSX.Element;
   unreadIndicatorPlacement: undefined | UnreadIndicatorPlacement;
 };
 
-function renderContact(contactId: string): React.JSX.Element {
+function renderContact(contactId: string): JSX.Element {
   return <SmartContactName contactId={contactId} />;
 }
 
-function renderUniversalTimerNotification(): React.JSX.Element {
+function renderUniversalTimerNotification(): JSX.Element {
   return <SmartUniversalTimerNotification />;
 }
 export const SmartTimelineItem = memo(function SmartTimelineItem(
   props: SmartTimelineItemProps
-): React.JSX.Element {
+): JSX.Element {
   const {
     containerElementRef,
     containerWidthBreakpoint,
@@ -93,7 +89,6 @@ export const SmartTimelineItem = memo(function SmartTimelineItem(
   const messageId = item.id;
   const i18n = useSelector(getIntl);
   const getPreferredBadge = useSelector(getPreferredBadgeSelector);
-  const interactionMode = useSelector(getInteractionMode);
   const theme = useSelector(getTheme);
   const platform = useSelector(getPlatform);
   const selectedMessageIds = useSelector(getSelectedMessageIds);
@@ -240,6 +235,7 @@ export const SmartTimelineItem = memo(function SmartTimelineItem(
     );
   }, [messageId]);
 
+  const isSignalConvo = isSignalConversation({ id: conversationId });
   return (
     <TimelineItem
       item={processedTimelineItem}
@@ -253,6 +249,7 @@ export const SmartTimelineItem = memo(function SmartTimelineItem(
       isTargeted={isTargeted}
       isSelectMode={selectedMessageIds != null}
       isSelected={isSelected}
+      isSignalConversation={isSignalConvo}
       renderAudioAttachment={renderAudioAttachment}
       renderContact={renderContact}
       renderReactionPicker={renderReactionPicker}
@@ -264,7 +261,6 @@ export const SmartTimelineItem = memo(function SmartTimelineItem(
       showEditHistoryModal={showEditHistoryModal}
       i18n={i18n}
       interactivity={interactivity}
-      interactionMode={interactionMode}
       isBlocked={isBlocked}
       isGroup={isGroup}
       theme={theme}

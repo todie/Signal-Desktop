@@ -4,7 +4,7 @@
 import lodash from 'lodash';
 
 import type { ConversationAttributesType } from '../model-types.d.ts';
-import { DataWriter } from '../sql/Client.preload.ts';
+import { DataReader, DataWriter } from '../sql/Client.preload.ts';
 import { hasErrors } from '../state/selectors/message.preload.ts';
 import { readSyncJobQueue } from '../jobs/readSyncJobQueue.preload.ts';
 import { notificationService } from '../services/notifications.preload.ts';
@@ -50,6 +50,7 @@ export async function markConversationRead(
     unreadEditedMessages,
     unreadReactions,
     unreadPollVotes,
+    lastUnreadCallId,
   ] = await Promise.all([
     DataWriter.getUnreadByConversationAndMarkRead({
       conversationId,
@@ -69,6 +70,10 @@ export async function markConversationRead(
       conversationId,
       readMessageReceivedAt: readMessage.received_at,
     }),
+    DataReader.getPrevUnreadCallIdInConversation(
+      conversationId,
+      readMessage.received_at
+    ),
   ]);
 
   const convoId = getConversationIdForLogging(conversationAttrs);
@@ -80,6 +85,7 @@ export async function markConversationRead(
       receivedAt: readMessage.received_at,
     },
     unreadMessages: unreadMessages.length,
+    unreadEditedMessages: unreadEditedMessages.length,
     unreadReactions: unreadReactions.length,
     unreadPollVotes: unreadPollVotes.length,
   });
@@ -88,7 +94,8 @@ export async function markConversationRead(
     !unreadMessages.length &&
     !unreadEditedMessages.length &&
     !unreadReactions.length &&
-    !unreadPollVotes.length
+    !unreadPollVotes.length &&
+    lastUnreadCallId == null
   ) {
     return false;
   }
@@ -244,8 +251,8 @@ export async function markConversationRead(
     log.info(logId, `Sending ${readSyncs.length} read syncs`);
     // Because syncReadMessages sends to our other devices, and sendReadReceipts goes
     //   to a contact, we need accessKeys for both.
-    if (window.ConversationController.areWePrimaryDevice()) {
-      log.warn(logId, 'We are primary device; not sending read syncs');
+    if (!window.ConversationController.doWeHaveOtherDevices()) {
+      log.info(logId, 'We have no other devices; not sending read syncs');
     } else {
       drop(readSyncJobQueue.add({ readSyncs }));
     }
@@ -260,8 +267,14 @@ export async function markConversationRead(
     }
   }
 
-  void updateExpiringMessagesService();
-  void tapToViewMessagesDeletionService.update();
+  if (lastUnreadCallId != null) {
+    window.reduxActions.callHistory.markCallHistoryReadInConversation(
+      lastUnreadCallId
+    );
+  }
+
+  updateExpiringMessagesService();
+  tapToViewMessagesDeletionService.update();
 
   return true;
 }

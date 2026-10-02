@@ -3,8 +3,8 @@
 
 import lodash from 'lodash';
 import classNames from 'classnames';
-import type { ReactNode, UIEvent } from 'react';
-import React from 'react';
+import type { ReactNode, UIEvent, JSX, FocusEvent, KeyboardEvent } from 'react';
+import { Component, createRef } from 'react';
 
 import {
   ScrollDownButton,
@@ -45,6 +45,8 @@ import {
 import { MessageInteractivity } from './Message.dom.tsx';
 import type { RenderItemProps } from '../../state/smart/TimelineItem.preload.tsx';
 import type { CollapseSet } from '../../util/CollapseSet.std.ts';
+import { tw } from '../../axo/tw.dom.tsx';
+import { TargetedMessageSource } from '../../state/ducks/conversationsEnums.std.ts';
 
 const { first, get, isNumber, last, throttle } = lodash;
 
@@ -52,7 +54,6 @@ const AT_BOTTOM_THRESHOLD = 15;
 const AT_BOTTOM_DETECTOR_STYLE = { height: AT_BOTTOM_THRESHOLD };
 
 const MIN_ROW_HEIGHT = 18;
-const SCROLL_DOWN_BUTTON_THRESHOLD = 8;
 const LOAD_NEWER_THRESHOLD = 5;
 
 const DELAY_BEFORE_MARKING_READ_AFTER_FOCUS = SECOND;
@@ -79,6 +80,7 @@ type PropsHousekeepingType = {
   isInFullScreenCall: boolean;
   isIncomingMessageRequest: boolean;
   isSomeoneTyping: boolean;
+  isSignalConversation: boolean;
   unreadCount?: number;
   unreadMentionsCount?: number;
   conversationType: 'direct' | 'group';
@@ -106,10 +108,10 @@ type PropsHousekeepingType = {
   updateVisibleMessages?: (messageIds: Array<string>) => void;
   renderContactSpoofingReviewDialog: (
     props: SmartContactSpoofingReviewDialogPropsType
-  ) => React.JSX.Element;
-  renderHeroRow: (id: string) => React.JSX.Element;
-  renderItem: (props: RenderItemProps) => React.JSX.Element;
-  renderTypingBubble: (id: string) => React.JSX.Element;
+  ) => JSX.Element;
+  renderHeroRow: (id: string) => JSX.Element;
+  renderItem: (props: RenderItemProps) => JSX.Element;
+  renderTypingBubble: (id: string) => JSX.Element;
 };
 
 export type PropsActionsType = {
@@ -125,7 +127,11 @@ export type PropsActionsType = {
   ) => unknown;
   markMessageRead: (conversationId: string, messageId: string) => unknown;
   maybePeekGroupCall: (conversationId: string) => unknown;
-  targetMessage: (messageId: string, conversationId: string) => unknown;
+  targetMessage: (
+    messageId: string,
+    conversationId: string,
+    targetedMessageSource: TargetedMessageSource
+  ) => unknown;
   setCenterMessage: (
     conversationId: string,
     messageId: string | undefined
@@ -156,17 +162,14 @@ type SnapshotType =
   | { scrollTop: number }
   | { scrollBottom: number };
 
-export class Timeline extends React.Component<
-  PropsType,
-  StateType,
-  SnapshotType
-> {
-  readonly #containerRef = React.createRef<HTMLDivElement>();
-  readonly #messagesRef = React.createRef<HTMLDivElement>();
-  readonly #atBottomDetectorRef = React.createRef<HTMLDivElement>();
-  readonly #lastSeenIndicatorRef = React.createRef<HTMLDivElement>();
+// oxlint-disable-next-line react/prefer-function-component
+export class Timeline extends Component<PropsType, StateType, SnapshotType> {
+  readonly #containerRef = createRef<HTMLDivElement>();
+  readonly #messagesRef = createRef<HTMLDivElement>();
+  readonly #atBottomDetectorRef = createRef<HTMLDivElement>();
+  readonly #lastSeenIndicatorRef = createRef<HTMLDivElement>();
   #intersectionObserver?: IntersectionObserver;
-  #intersectionRatios: Map<Element, number> = new Map();
+  #intersectionRatios = new Map<Element, number>();
 
   // This is a best guess. It will likely be overridden when the timeline is measured.
   #maxVisibleRows = Math.ceil(window.innerHeight / MIN_ROW_HEIGHT);
@@ -184,7 +187,7 @@ export class Timeline extends React.Component<
     widthBreakpoint: WidthBreakpoint.Wide,
   };
 
-  #onScrollLockChange = (): void => {
+  readonly #onScrollLockChange = (): void => {
     const scrollLocked = this.#scrollerLock.isLocked();
     this.setState(() => {
       // Prevent scroll due to elements shrinking or disappearing (e.g. typing indicators)
@@ -198,9 +201,12 @@ export class Timeline extends React.Component<
     });
   };
 
-  #scrollerLock = createScrollerLock('Timeline', this.#onScrollLockChange);
+  readonly #scrollerLock = createScrollerLock(
+    'Timeline',
+    this.#onScrollLockChange
+  );
 
-  #onScroll = (event: UIEvent): void => {
+  readonly #onScroll = (event: UIEvent): void => {
     // When content is removed from the viewport, such as typing indicators leaving
     // or messages being edited smaller or deleted, scroll events are generated and
     // they are marked as user-generated (isTrusted === true). Actual user generated
@@ -246,7 +252,7 @@ export class Timeline extends React.Component<
       ?.scrollIntoView({ block: 'center' });
   }
 
-  #scrollToBottom = (setFocus?: boolean): void => {
+  readonly #scrollToBottom = (setFocus?: boolean): void => {
     if (this.#scrollerLock.isLocked()) {
       return;
     }
@@ -257,7 +263,7 @@ export class Timeline extends React.Component<
       const lastIndex = items.length - 1;
       const lastItem = items[lastIndex];
       strictAssert(lastItem, 'Missing lastItem');
-      targetMessage(lastItem.id, id);
+      targetMessage(lastItem.id, id, TargetedMessageSource.Focus);
     } else {
       const containerEl = this.#containerRef.current;
       if (containerEl) {
@@ -266,12 +272,12 @@ export class Timeline extends React.Component<
     }
   };
 
-  #onClickScrollDownButton = (): void => {
+  readonly #onClickScrollDownButton = (): void => {
     this.#scrollerLock.onUserInterrupt('onClickScrollDownButton');
     this.#scrollDown(false);
   };
 
-  #scrollDown = (setFocus?: boolean): void => {
+  readonly #scrollDown = (setFocus?: boolean): void => {
     if (this.#scrollerLock.isLocked()) {
       return;
     }
@@ -302,14 +308,32 @@ export class Timeline extends React.Component<
       items.findIndex(item => item.id === newestBottomVisibleMessageId) <
         oldestUnseenIndex
     ) {
-      if (setFocus) {
-        const item = items[oldestUnseenIndex];
-        strictAssert(item, 'Missing item at oldestUnseenIndex');
-        targetMessage(item.id, id);
-      } else {
-        this.#lastSeenIndicatorRef.current?.scrollIntoView();
+      const lastSeenElement = this.#lastSeenIndicatorRef.current;
+      const containerElement = this.#containerRef.current;
+
+      if (lastSeenElement && containerElement) {
+        const lastSeenBounds = lastSeenElement.getBoundingClientRect();
+        const containerBounds = containerElement.getBoundingClientRect();
+        const containerMidpoint =
+          (containerBounds.bottom + containerBounds.top) / 2;
+
+        // We attempt to scroll the last seen indicator if it's below the screen midpoint,
+        // as well as if it's below the current screen. We want it near the top so the
+        // user sees it. The next click will fall through, to a full 'scroll to bottom.'
+        if (lastSeenBounds.top > containerMidpoint) {
+          if (setFocus) {
+            const item = items[oldestUnseenIndex];
+            strictAssert(item, 'Missing item at oldestUnseenIndex');
+            targetMessage(item.id, id, TargetedMessageSource.Focus);
+          } else {
+            lastSeenElement.scrollIntoView();
+          }
+          return;
+        }
       }
-    } else if (haveNewest) {
+    }
+
+    if (haveNewest) {
       this.#scrollToBottom(setFocus);
     } else {
       const lastItem = last(items);
@@ -391,7 +415,7 @@ export class Timeline extends React.Component<
           if (element === atBottomDetectorEl) {
             newIsNearBottom = true;
           } else {
-            oldestPartiallyVisible = oldestPartiallyVisible || element;
+            oldestPartiallyVisible ??= element;
             newestPartiallyVisible = element;
             if (intersectionRatio === 1) {
               newestFullyVisible = element;
@@ -536,93 +560,97 @@ export class Timeline extends React.Component<
     return centerMessageId;
   }
 
-  #markNewestBottomVisibleMessageRead = throttle((itemId?: string): void => {
-    const { id, items, markMessageRead } = this.props;
-    const messageIdToMarkRead =
-      itemId ?? this.state.newestBottomVisibleMessageId;
+  readonly #markNewestBottomVisibleMessageRead = throttle(
+    (itemId?: string): void => {
+      const { id, items, markMessageRead } = this.props;
+      const messageIdToMarkRead =
+        itemId ?? this.state.newestBottomVisibleMessageId;
 
-    if (!messageIdToMarkRead) {
-      return;
-    }
+      if (!messageIdToMarkRead) {
+        return;
+      }
 
-    const lastIndex = items.length - 1;
-    const newestBottomVisibleItemIndex = items.findIndex(
-      item => item.id === messageIdToMarkRead
-    );
+      const lastIndex = items.length - 1;
+      const newestBottomVisibleItemIndex = items.findIndex(
+        item => item.id === messageIdToMarkRead
+      );
 
-    // Mark the newest visible message read if we're at the bottom, or override provided
-    if (
-      messageIdToMarkRead &&
-      (itemId || lastIndex === newestBottomVisibleItemIndex)
-    ) {
-      const item = items[newestBottomVisibleItemIndex];
-      if (!item || item.type === 'none') {
+      // Mark the newest visible message read if we're at the bottom, or override provided
+      if (
+        messageIdToMarkRead &&
+        (itemId || lastIndex === newestBottomVisibleItemIndex)
+      ) {
+        const item = items[newestBottomVisibleItemIndex];
+        if (!item || item.type === 'none') {
+          markMessageRead(id, messageIdToMarkRead);
+          return;
+        }
+      }
+
+      // We can return early if the newest partially-visible item is not a CollapseSet
+      const newestPartiallyVisibleIndex = Math.min(
+        lastIndex,
+        newestBottomVisibleItemIndex + 1
+      );
+      const newestPartiallyVisibleItem = items[newestPartiallyVisibleIndex];
+      if (
+        newestPartiallyVisibleItem &&
+        newestPartiallyVisibleItem.type === 'none'
+      ) {
         markMessageRead(id, messageIdToMarkRead);
         return;
       }
-    }
 
-    // We can return early if the newest partially-visible item is not a CollapseSet
-    const newestPartiallyVisibleIndex = Math.min(
-      lastIndex,
-      newestBottomVisibleItemIndex + 1
-    );
-    const newestPartiallyVisibleItem = items[newestPartiallyVisibleIndex];
-    if (
-      newestPartiallyVisibleItem &&
-      newestPartiallyVisibleItem.type === 'none'
-    ) {
-      markMessageRead(id, messageIdToMarkRead);
-      return;
-    }
-
-    // Now we need to figure out which of the CollapseSet's inner messages are visible
-    const collapseSetEl = this.#messagesRef.current?.querySelector(
-      `[data-item-index="${newestPartiallyVisibleIndex}"]`
-    );
-    const containerWindowRect =
-      this.#containerRef.current?.getBoundingClientRect();
-    if (!collapseSetEl || !containerWindowRect) {
-      markMessageRead(id, messageIdToMarkRead);
-      return;
-    }
-
-    const messageEls = collapseSetEl.querySelectorAll('[data-message-id]');
-    const containerWindowBottom =
-      containerWindowRect.y + containerWindowRect.height;
-
-    let newestFullyVisibleMessage;
-    for (let i = messageEls.length - 1; i >= 0; i -= 1) {
-      const messageEl = messageEls[i];
-      strictAssert(messageEl, 'No messageEl at index i');
-
-      // The messages might be rendered, but opacity = 0
-      if (!messageEl.checkVisibility({ opacityProperty: true })) {
-        break;
+      // Now we need to figure out which of the CollapseSet's inner messages are visible
+      const collapseSetEl = this.#messagesRef.current?.querySelector(
+        `[data-item-index="${newestPartiallyVisibleIndex}"]`
+      );
+      const containerWindowRect =
+        this.#containerRef.current?.getBoundingClientRect();
+      if (!collapseSetEl || !containerWindowRect) {
+        markMessageRead(id, messageIdToMarkRead);
+        return;
       }
 
-      // Make sure the messages are scrolled into view
-      const messageRect = messageEl.getBoundingClientRect();
-      const bottom = messageRect.y + messageRect.height;
+      const messageEls = collapseSetEl.querySelectorAll('[data-message-id]');
+      const containerWindowBottom =
+        containerWindowRect.y + containerWindowRect.height;
 
-      if (bottom <= containerWindowBottom) {
-        newestFullyVisibleMessage = messageEl;
-        break;
+      let newestFullyVisibleMessage;
+      for (let i = messageEls.length - 1; i >= 0; i -= 1) {
+        const messageEl = messageEls[i];
+        strictAssert(messageEl, 'No messageEl at index i');
+
+        // The messages might be rendered, but opacity = 0
+        if (!messageEl.checkVisibility({ opacityProperty: true })) {
+          break;
+        }
+
+        // Make sure the messages are scrolled into view
+        const messageRect = messageEl.getBoundingClientRect();
+        const bottom = messageRect.y + messageRect.height;
+
+        if (bottom <= containerWindowBottom) {
+          newestFullyVisibleMessage = messageEl;
+          break;
+        }
       }
-    }
 
-    if (!newestFullyVisibleMessage) {
-      markMessageRead(id, messageIdToMarkRead);
-      return;
-    }
+      if (!newestFullyVisibleMessage) {
+        markMessageRead(id, messageIdToMarkRead);
+        return;
+      }
 
-    const messageId = newestFullyVisibleMessage.getAttribute('data-message-id');
-    markMessageRead(id, messageId || messageIdToMarkRead);
-  }, 500);
+      const messageId =
+        newestFullyVisibleMessage.getAttribute('data-message-id');
+      markMessageRead(id, messageId || messageIdToMarkRead);
+    },
+    500
+  );
 
   // When the the window becomes active, or when a fullsceen call is ended, we mark read
   // with a delay, to allow users to navigate away quickly without marking messages read
-  #markNewestBottomVisibleMessageReadAfterDelay = throttle(
+  readonly #markNewestBottomVisibleMessageReadAfterDelay = throttle(
     this.#markNewestBottomVisibleMessageRead,
     DELAY_BEFORE_MARKING_READ_AFTER_FOCUS,
     {
@@ -854,7 +882,7 @@ export class Timeline extends React.Component<
     }
   }
 
-  #handleBlur = (event: React.FocusEvent): void => {
+  readonly #handleBlur = (event: FocusEvent): void => {
     const { clearTargetedMessage } = this.props;
 
     const { currentTarget } = event;
@@ -878,7 +906,7 @@ export class Timeline extends React.Component<
     }, 0);
   };
 
-  #handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+  readonly #handleKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     const { targetMessage, targetedMessageId, items, id } = this.props;
     const commandKey = get(window, 'platform') === 'darwin' && event.metaKey;
     const controlKey = get(window, 'platform') !== 'darwin' && event.ctrlKey;
@@ -918,7 +946,11 @@ export class Timeline extends React.Component<
             targetInnerMessage,
             'No message at targetIndex in items.messages'
           );
-          targetMessage(targetInnerMessage.id, id);
+          targetMessage(
+            targetInnerMessage.id,
+            id,
+            TargetedMessageSource.NavigateToMessage
+          );
 
           event.preventDefault();
           event.stopPropagation();
@@ -935,7 +967,7 @@ export class Timeline extends React.Component<
       const targetItem = items[targetIndex];
       strictAssert(targetItem, 'Missing item at targetIndex');
       if (targetItem.type === 'none') {
-        targetMessage(targetItem.id, id);
+        targetMessage(targetItem.id, id, TargetedMessageSource.Focus);
 
         event.preventDefault();
         event.stopPropagation();
@@ -948,7 +980,7 @@ export class Timeline extends React.Component<
           : first(targetItem.messages);
 
       strictAssert(targetInnerMessage, 'Expect to get first/last of target');
-      targetMessage(targetInnerMessage.id, id);
+      targetMessage(targetInnerMessage.id, id, TargetedMessageSource.Focus);
 
       event.preventDefault();
       event.stopPropagation();
@@ -1024,7 +1056,7 @@ export class Timeline extends React.Component<
 
         if (direction === -1) {
           if (currentTop <= targetTop || index === 0) {
-            targetMessage(currentMessageId, id);
+            targetMessage(currentMessageId, id, TargetedMessageSource.Focus);
 
             event.preventDefault();
             event.stopPropagation();
@@ -1034,7 +1066,7 @@ export class Timeline extends React.Component<
           const currentBottom = currentTop + currentRect.height;
 
           if (currentBottom > targetBottom || index === max - 1) {
-            targetMessage(currentMessageId, id);
+            targetMessage(currentMessageId, id, TargetedMessageSource.Focus);
 
             event.preventDefault();
             event.stopPropagation();
@@ -1048,7 +1080,7 @@ export class Timeline extends React.Component<
     if (event.key === 'Home' || (commandOrCtrl && event.key === 'ArrowUp')) {
       const firstMessageId = first(items);
       if (firstMessageId) {
-        targetMessage(firstMessageId.id, id);
+        targetMessage(firstMessageId.id, id, TargetedMessageSource.Focus);
         event.preventDefault();
         event.stopPropagation();
       }
@@ -1062,7 +1094,7 @@ export class Timeline extends React.Component<
     }
   };
 
-  public override render(): React.JSX.Element | null {
+  public override render(): JSX.Element | null {
     const {
       clearInvitedServiceIdsForNewlyCreatedGroup,
       closeContactSpoofingReview,
@@ -1078,6 +1110,7 @@ export class Timeline extends React.Component<
       isBlocked,
       isConversationSelected,
       isGroupV1AndDisabled,
+      isNearBottom,
       items,
       messageLoadingState,
       oldestUnseenIndex,
@@ -1110,28 +1143,21 @@ export class Timeline extends React.Component<
     const areThereAnyMessages = items.length > 0;
     const areAnyMessagesUnread = Boolean(unreadCount);
     const lastItem = last(items);
-    const areAnyMessagesBelowCurrentPosition =
-      !haveNewest ||
-      Boolean(
-        newestBottomVisibleMessageId &&
-        newestBottomVisibleMessageId !== lastItem?.id
-      );
-    const areAboveScrollDownButtonThreshold =
-      !haveNewest ||
-      (newestBottomVisibleMessageId &&
-        !items
-          .slice(-SCROLL_DOWN_BUTTON_THRESHOLD)
-          .find(item => item.id === newestBottomVisibleMessageId));
 
-    const areUnreadBelowCurrentPosition = Boolean(
+    const visibleMessageId =
+      newestBottomVisibleMessageId ?? oldestPartiallyVisibleMessageId;
+
+    const areAnyMessagesBelowCurrentPosition =
+      areThereAnyMessages &&
+      (!haveNewest ||
+        (visibleMessageId != null && visibleMessageId !== lastItem?.id));
+
+    const areUnreadBelowCurrentPosition =
       areThereAnyMessages &&
       areAnyMessagesUnread &&
-      areAnyMessagesBelowCurrentPosition
-    );
-    const shouldShowScrollDownButtons = Boolean(
-      areThereAnyMessages &&
-      (areUnreadBelowCurrentPosition || areAboveScrollDownButtonThreshold)
-    );
+      areAnyMessagesBelowCurrentPosition;
+    const shouldShowScrollDownButtons =
+      areThereAnyMessages && isNearBottom === false;
 
     let floatingHeader: ReactNode;
     // It's possible that a message was removed from `items` but we still have its ID in
@@ -1242,7 +1268,7 @@ export class Timeline extends React.Component<
               return;
             }
 
-            const { isNearBottom } = this.props;
+            const { isNearBottom: latestIsNearBottom } = this.props;
 
             this.setState({
               widthBreakpoint: getWidthBreakpoint(size.width),
@@ -1251,7 +1277,7 @@ export class Timeline extends React.Component<
             this.#maxVisibleRows = Math.ceil(size.height / MIN_ROW_HEIGHT);
 
             const containerEl = this.#containerRef.current;
-            if (containerEl && isNearBottom) {
+            if (containerEl && latestIsNearBottom) {
               scrollToBottom(containerEl);
             }
           }}
@@ -1295,6 +1321,11 @@ export class Timeline extends React.Component<
 
                   {messageNodes}
 
+                  {this.props.isSignalConversation ? (
+                    // Spacer at bottom of conversation to give space for the absolutely-positioned
+                    // official-chat chip to not overlap the last message
+                    <div className={tw('h-16')} />
+                  ) : null}
                   {haveNewest && renderTypingBubble(id)}
 
                   <div
@@ -1327,6 +1358,23 @@ export class Timeline extends React.Component<
           )}
         </SizeObserver>
 
+        {this.props.isSignalConversation ? (
+          <div
+            className={tw(
+              'absolute bottom-5 z-10 flex w-full justify-center pe-3.5'
+            )}
+          >
+            <div
+              className={tw(
+                'rounded-3xl bg-(--axo-color-legacy-signal-conversation-bg) px-4 py-3',
+                'type-body-medium text-primary',
+                'border border-secondary'
+              )}
+            >
+              {i18n('icu:Timeline--signal-official-chat--chip')}
+            </div>
+          </div>
+        ) : null}
         {Boolean(invitedContactsForNewlyCreatedGroup.length) && (
           <NewlyCreatedGroupInvitedContactsDialog
             contacts={invitedContactsForNewlyCreatedGroup}

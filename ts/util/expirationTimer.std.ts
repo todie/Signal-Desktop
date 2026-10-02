@@ -6,6 +6,7 @@ import type { Unit } from 'humanize-duration';
 import lodash from 'lodash';
 import type { LocalizerType } from '../types/Util.std.ts';
 import { SECOND, DurationInSeconds } from './durations/index.std.ts';
+import { MAX_SAFE_DATE } from './timestamp.std.ts';
 
 const { isNumber } = lodash;
 
@@ -75,8 +76,9 @@ export function format(
     // if we have an explicit `largest` specified,
     // allow it to pick from all the units
     units: largest ? allUnits : defaultUnits,
-    largest,
+    largest: largest ?? defaultUnits.length,
     language: locale,
+    digitReplacements: undefined,
     ...(fallbacks.length ? { fallbacks } : {}),
   });
 }
@@ -93,4 +95,20 @@ export function calculateExpirationTimestamp({
   return isNumber(expirationStartTimestamp) && isNumber(expireTimer)
     ? expirationStartTimestamp + DurationInSeconds.toMillis(expireTimer)
     : undefined;
+}
+
+export function getStoryExpirationStartTimestamp({
+  timestamp,
+  serverTimestamp,
+}: {
+  timestamp: number;
+  serverTimestamp?: number | null;
+}): number {
+  return Math.min(
+    timestamp,
+    isNumber(serverTimestamp) && serverTimestamp > 0
+      ? serverTimestamp
+      : MAX_SAFE_DATE,
+    Date.now()
+  );
 }

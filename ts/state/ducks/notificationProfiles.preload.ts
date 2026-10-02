@@ -28,7 +28,7 @@ import {
   prepareForDisabledNotificationProfileSync,
   prepareForEnabledNotificationProfileSync,
 } from '../../services/storageRecordOps.preload.ts';
-import { storageServiceUploadJob } from '../../services/storage.preload.ts';
+import { runStorageServiceUploadJob } from '../../services/storage.preload.ts';
 import { SECOND } from '../../util/durations/constants.std.ts';
 
 import type {
@@ -152,11 +152,14 @@ export const useNotificationProfilesActions = (): BoundActionCreatorsMapObject<
 const updateStorageService = debounce(
   (reason: string, options: { force?: boolean } = {}) => {
     const disabled = itemStorage.get('notificationProfileSyncDisabled');
-    if (disabled && !options.force) {
+    const areWePrimaryDevice =
+      window.ConversationController.areWePrimaryDevice();
+
+    if (disabled && !areWePrimaryDevice && !options.force) {
       return;
     }
 
-    storageServiceUploadJob({
+    runStorageServiceUploadJob({
       reason,
     });
   },
@@ -210,7 +213,7 @@ function markProfileDeleted(
 // If called based on a local change, this function is run before the storage service
 // upload. If called based on a storage service update, it is called at the end of
 // processing, as the AccountRecord is processed. All profiles have been processed at
-// that point, and the override from AccountRecord has been processed as well.
+// that point, and the override from AccountRecord is just about to be processed.
 function setIsSyncEnabled(
   enabled: boolean,
   { fromStorageService }: { fromStorageService: boolean }
@@ -222,6 +225,22 @@ function setIsSyncEnabled(
 
     if (items.notificationProfileSyncDisabled === disabled) {
       log.warn('No change to current sync state, returning early');
+      return;
+    }
+
+    const areWePrimaryDevice =
+      window.ConversationController.areWePrimaryDevice();
+
+    // In the primary case, nothing much needs to change when this option changes
+    if (areWePrimaryDevice) {
+      await itemStorage.put('notificationProfileSyncDisabled', disabled);
+
+      if (!fromStorageService) {
+        const me = window.ConversationController.getOurConversationOrThrow();
+        me.captureChange(logId);
+        updateStorageService(logId);
+      }
+
       return;
     }
 
@@ -237,9 +256,7 @@ function setIsSyncEnabled(
       await itemStorage.put('notificationProfileSyncDisabled', disabled);
       if (disabled) {
         if (!fromStorageService) {
-          const globalOverride = await itemStorage.get(
-            'notificationProfileOverride'
-          );
+          const globalOverride = itemStorage.get('notificationProfileOverride');
 
           await itemStorage.put(
             'notificationProfileOverrideFromPrimary',
@@ -318,8 +335,17 @@ function setProfileOverride(
     const state = getState();
     const currentOverride = getOverride(state);
 
+    const isNotificationProfileSyncEnabled = !itemStorage.get(
+      'notificationProfileSyncDisabled',
+      false
+    );
+    const areWePrimaryDevice =
+      window.ConversationController.areWePrimaryDevice();
+
     const me = window.ConversationController.getOurConversationOrThrow();
-    me.captureChange(logId);
+    if (isNotificationProfileSyncEnabled || areWePrimaryDevice) {
+      me.captureChange(logId);
+    }
 
     if (enabled) {
       if (
@@ -346,7 +372,9 @@ function setProfileOverride(
         payload: newOverride,
       });
       fastUpdateProfileService();
-      updateStorageService(logId);
+      if (isNotificationProfileSyncEnabled || areWePrimaryDevice) {
+        updateStorageService(logId);
+      }
 
       return;
     }
@@ -361,7 +389,10 @@ function setProfileOverride(
       payload: newOverride,
     });
     fastUpdateProfileService();
-    updateStorageService(logId);
+
+    if (isNotificationProfileSyncEnabled || areWePrimaryDevice) {
+      updateStorageService(logId);
+    }
   };
 }
 
@@ -394,6 +425,7 @@ function updateOverride(
     const enabled = payload?.enabled;
     await itemStorage.put('notificationProfileOverride', payload);
 
+    // oxlint-disable-next-line typescript/no-base-to-string, typescript/restrict-template-expressions
     const logId = `updateOverride/${id ? redactNotificationProfileId(id) : 'undefined'}/enabled=${enabled}`;
 
     dispatch({
@@ -401,7 +433,17 @@ function updateOverride(
       payload,
     });
 
-    if (!fromStorageService) {
+    const isNotificationProfileSyncEnabled = !itemStorage.get(
+      'notificationProfileSyncDisabled',
+      false
+    );
+    const areWePrimaryDevice =
+      window.ConversationController.areWePrimaryDevice();
+
+    if (
+      !fromStorageService &&
+      (isNotificationProfileSyncEnabled || areWePrimaryDevice)
+    ) {
       const me = window.ConversationController.getOurConversationOrThrow();
       me.captureChange(logId);
       updateStorageService(logId);

@@ -5,8 +5,6 @@ import type { MenuItemConstructorOptions } from 'electron';
 import { ipcRenderer } from 'electron';
 
 import type { MenuOptionsType } from '../types/menu.std.ts';
-import type { LocaleEmojiListType } from '../types/emoji.std.ts';
-import { LocaleEmojiListSchema } from '../types/emoji.std.ts';
 import type {
   MainWindowStatsType,
   MinimalSignalContextType,
@@ -24,9 +22,6 @@ import {
 } from '../context/localeMessages.preload.ts';
 import { waitForSettingsChange } from '../context/waitForSettingsChange.preload.ts';
 import { isTestOrMockEnvironment } from '../environment.std.ts';
-import { parseUnknown } from '../util/schemas.std.ts';
-
-const emojiListCache = new Map<string, LocaleEmojiListType>();
 
 export const MinimalSignalContext: MinimalSignalContextType = {
   activeWindowService,
@@ -36,34 +31,18 @@ export const MinimalSignalContext: MinimalSignalContextType = {
   ): Promise<void> {
     await ipcRenderer.invoke('executeMenuRole', role);
   },
-  getAppInstance: (): string | undefined =>
-    config.appInstance ? String(config.appInstance) : undefined,
+  getAppInstance: (): string | undefined => config.appInstance,
   getEnvironment: () => environment,
-  getNodeVersion: (): string => String(config.nodeVersion),
+  getNodeVersion: (): string => config.nodeVersion,
   getPath: (name: 'userData' | 'home' | 'install'): string => {
-    return String(config[`${name}Path`]);
+    return config[`${name}Path`];
   },
-  getVersion: (): string => String(config.version),
+  getVersion: (): string => config.version,
   async getMainWindowStats(): Promise<MainWindowStatsType> {
     return ipcRenderer.invoke('getMainWindowStats');
   },
   async getMenuOptions(): Promise<MenuOptionsType> {
     return ipcRenderer.invoke('getMenuOptions');
-  },
-  async getLocalizedEmojiList(locale: string) {
-    const cached = emojiListCache.get(locale);
-    if (cached) {
-      return cached;
-    }
-
-    const buf = await ipcRenderer.invoke(
-      'OptionalResourceService:getData',
-      `emoji-index-${locale}.json`
-    );
-    const json: unknown = JSON.parse(Buffer.from(buf).toString());
-    const result = parseUnknown(LocaleEmojiListSchema, json);
-    emojiListCache.set(locale, result);
-    return result;
   },
   getI18nAvailableLocales: () => config.availableLocales,
   getI18nLocale: () => config.resolvedTranslationsLocale,
@@ -90,4 +69,5 @@ export const MinimalSignalContext: MinimalSignalContextType = {
     themeSetting: createSetting('themeSetting', { setter: false }),
     waitForChange: waitForSettingsChange,
   },
+  Emojify: undefined,
 };

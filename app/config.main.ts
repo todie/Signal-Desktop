@@ -4,7 +4,7 @@
 import { join, basename } from 'node:path';
 import { app } from 'electron';
 
-import type { IConfig } from 'config';
+import type { Config } from 'config';
 
 import {
   Environment,
@@ -30,6 +30,11 @@ if (app.isPackaged) {
 // Set environment vars to configure node-config before requiring it
 process.env.NODE_ENV = getEnvironment();
 
+if (process.env.NODE_ENV === Environment.Test) {
+  // Necessary for `tsx` to work in preload (there are no worker_threads)
+  process.env.ESBUILD_WORKER_THREADS = '0';
+}
+
 if (getEnvironment() === Environment.PackagedApp) {
   // harden production config against the local env
   process.env.NODE_CONFIG = '';
@@ -42,7 +47,6 @@ if (getEnvironment() === Environment.PackagedApp) {
   process.env.SIGNAL_ENABLE_HTTP = '';
   process.env.SIGNAL_CI_CONFIG = '';
   process.env.GENERATE_PRELOAD_CACHE = '';
-  process.env.REACT_DEVTOOLS = '';
   process.env.IS_BUNDLED = '1';
 }
 
@@ -54,7 +58,7 @@ process.env.NODE_CONFIG_DIR = join(getAppRootDir(), 'config');
 // the module regardless of their actual placement in the file.
 // See: https://github.com/evanw/esbuild/issues/2011
 // oxlint-disable-next-line typescript/no-var-requires
-const config: IConfig = require('config');
+const config: Config = require('config');
 
 if (getEnvironment() !== Environment.PackagedApp) {
   config.util.getConfigSources().forEach(source => {
@@ -78,4 +82,4 @@ if (getEnvironment() !== Environment.PackagedApp) {
 });
 
 export default config;
-export type { IConfig as ConfigType };
+export type { Config as ConfigType };

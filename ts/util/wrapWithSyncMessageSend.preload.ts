@@ -59,6 +59,7 @@ export async function wrapWithSyncMessageSend({
       error = thrown;
     } else {
       log.error(`${logId}: Thrown value was not an Error, returning early`);
+      // oxlint-disable-next-line typescript/only-throw-error
       throw error;
     }
   }
@@ -74,6 +75,8 @@ export async function wrapWithSyncMessageSend({
   if (didSuccessfullySendOne) {
     if (!dataMessage) {
       log.error(`${logId}: dataMessage was not returned by send!`);
+    } else if (!window.ConversationController.doWeHaveOtherDevices()) {
+      log.info(`${logId}: We have no other devices; not sending sync message`);
     } else {
       log.info(`${logId}: Sending sync message... `);
       const ourConversation =

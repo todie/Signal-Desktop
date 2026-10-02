@@ -50,7 +50,6 @@ import type {
   AciString,
   ServiceIdString,
 } from '../../../types/ServiceId.std.ts';
-import { generateAci, getAciFromPrefix } from '../../../types/ServiceId.std.ts';
 import {
   getDefaultConversation,
   getDefaultGroup,
@@ -61,13 +60,17 @@ import {
   defaultChooseGroupMembersComposerState,
   defaultSetGroupMetadataComposerState,
 } from '../../../test-helpers/defaultComposerStates.std.ts';
+import {
+  generateAci,
+  getAciFromPrefix,
+} from '../../../test-helpers/serviceIdUtils.std.ts';
 
 describe('both/state/selectors/conversations-extra', () => {
   const SERVICE_ID_1 = generateAci();
   const SERVICE_ID_2 = generateAci();
 
   const getEmptyRootState = (): StateType => {
-    return rootReducer(undefined, noopAction());
+    return rootReducer(undefined, noopAction('getEmptyRootState'));
   };
 
   function makeConversation(id: string): ConversationType {

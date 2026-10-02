@@ -76,7 +76,7 @@ export type EventType = Readonly<
 
 export type SubscribeNotifierType = (event: EventType) => void;
 
-export type UnsubscribeFunctionType = () => void;
+export type UnsubscribeFunctionType = () => Promise<void>;
 
 export type SubscriberType = Readonly<{
   notify: SubscribeNotifierType;
@@ -113,7 +113,7 @@ export class Provisioner {
   };
   readonly #retryBackOff = new BackOff(FIBONACCI_TIMEOUTS);
 
-  #sockets: Array<ProvisioningConnection> = [];
+  readonly #sockets: Array<ProvisioningConnection> = [];
   #abortController: AbortController | undefined;
   #attemptCount = 0;
   #isRunning = false;
@@ -130,7 +130,7 @@ export class Provisioner {
       this.#start();
     }
 
-    return () => {
+    return async () => {
       this.#subscribers.delete(subscriber);
       if (this.#subscribers.size === 0) {
         this.#stop('Cancel, no subscribers');
@@ -160,13 +160,12 @@ export class Provisioner {
       readReceipts,
       ephemeralBackupKey,
       accountEntropyPool,
+      authCredentialSalt,
       mediaRootBackupKey,
     } = envelope;
 
-    strictAssert(number, 'prepareLinkData: missing number');
     strictAssert(provisioningCode, 'prepareLinkData: missing provisioningCode');
     strictAssert(aciKeyPair, 'prepareLinkData: missing aciKeyPair');
-    strictAssert(pniKeyPair, 'prepareLinkData: missing pniKeyPair');
     strictAssert(
       Bytes.isNotEmpty(profileKey),
       'prepareLinkData: missing profileKey'
@@ -176,8 +175,37 @@ export class Provisioner {
       'prepareLinkData: missing masterKey or accountEntropyPool'
     );
 
+    if (ourPni == null) {
+      strictAssert(
+        authCredentialSalt != null,
+        'prepareLinkData: missing authCredentialSalt'
+      );
+      return {
+        type: AccountType.Linked,
+        hasE164: false,
+        verificationCode: provisioningCode,
+        aciKeyPair,
+        profileKey,
+        deviceName: normalizeDeviceName(deviceName).slice(
+          0,
+          MAX_DEVICE_NAME_LENGTH
+        ),
+        userAgent,
+        ourAci,
+        readReceipts: Boolean(readReceipts),
+        masterKey,
+        ephemeralBackupKey,
+        authCredentialSalt,
+        accountEntropyPool,
+        mediaRootBackupKey,
+      };
+    }
+
+    strictAssert(number != null, 'prepareLinkData: missing number');
+    strictAssert(pniKeyPair != null, 'prepareLinkData: missing pniKeyPair');
     return {
       type: AccountType.Linked,
+      hasE164: true,
       number,
       verificationCode: provisioningCode,
       aciKeyPair,
@@ -193,6 +221,7 @@ export class Provisioner {
       readReceipts: Boolean(readReceipts),
       masterKey,
       ephemeralBackupKey,
+      authCredentialSalt,
       accountEntropyPool,
       mediaRootBackupKey,
     };
@@ -221,11 +250,10 @@ export class Provisioner {
       return;
     }
     log.info(`stopping, reason=${reason}`);
+    this.#isRunning = false;
 
-    this.#sockets = [];
     this.#abortController?.abort();
     this.#abortController = undefined;
-    this.#isRunning = false;
   }
 
   async #loop(signal: AbortSignal): Promise<void> {
@@ -241,6 +269,7 @@ export class Provisioner {
         });
 
         this.#stop('Max rotations reached');
+
         break;
       }
 
@@ -287,6 +316,7 @@ export class Provisioner {
           }
 
           this.#subscribers.clear();
+
           this.#stop('Only socket failed');
 
           break;
@@ -387,17 +417,19 @@ export class Provisioner {
 
     // But only register it once we get the uuid from server back.
 
-    const uuid = await pTimeout(
-      uuidPromise.promise,
-      Math.max(0, timeoutAt - Date.now()),
-      TIMEOUT_ERROR
-    );
+    const uuid = await pTimeout(uuidPromise.promise, {
+      milliseconds: Math.max(0, timeoutAt - Date.now()),
+      message: TIMEOUT_ERROR,
+    });
 
     const url = linkDeviceRoute
       .toAppUrl({
         uuid,
         pubKey: Bytes.toBase64(cipher.getPublicKey().serialize()),
-        capabilities: isLinkAndSyncEnabled() ? ['backup5'] : [],
+        capabilities: [
+          'nopni', // e164-less linking
+          ...(isLinkAndSyncEnabled() ? ['backup5'] : []),
+        ],
       })
       .toString();
 

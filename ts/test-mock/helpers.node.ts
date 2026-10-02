@@ -16,6 +16,7 @@ import { expect } from 'playwright/test';
 import { strictAssert } from '../util/assert.std.ts';
 import { SECOND } from '../util/durations/constants.std.ts';
 import { toNumber } from '../util/toNumber.std.ts';
+import type { Emoji } from '../axo/emoji.std.ts';
 
 const debug = createDebug('mock:test:helpers');
 
@@ -85,6 +86,48 @@ export async function typeIntoInput(
     await expect(input).toHaveValue(updatedText);
   } else {
     await expect(input).toHaveText(updatedText);
+  }
+}
+
+const VERIFICATION_CODE_LENGTH = 6;
+
+function verificationCodeInput(window: Page, index: number): Locator {
+  return window.getByLabel(
+    `Character ${index + 1} of ${VERIFICATION_CODE_LENGTH}`
+  );
+}
+
+export async function typeVerificationCode(
+  window: Page,
+  code: string
+): Promise<void> {
+  for (let i = 0; i < code.length; i += 1) {
+    const char = code[i] ?? '';
+
+    // oxlint-disable-next-line no-await-in-loop
+    await verificationCodeInput(window, i).pressSequentially(char);
+
+    // oxlint-disable-next-line no-await-in-loop
+    await expect(verificationCodeInput(window, i)).toHaveValue(char);
+  }
+}
+
+export async function clearVerificationCode(window: Page): Promise<void> {
+  for (let i = VERIFICATION_CODE_LENGTH - 1; i >= 0; i -= 1) {
+    // oxlint-disable-next-line no-await-in-loop
+    await verificationCodeInput(window, i).selectText();
+    // oxlint-disable-next-line no-await-in-loop
+    await verificationCodeInput(window, i).press('Backspace');
+    if (i > 0) {
+      // Wait for radix to focus the next input
+      // oxlint-disable-next-line no-await-in-loop
+      await expect(verificationCodeInput(window, i - 1)).toBeFocused();
+    }
+  }
+
+  for (let i = 0; i < VERIFICATION_CODE_LENGTH; i += 1) {
+    // oxlint-disable-next-line no-await-in-loop
+    await expect(verificationCodeInput(window, i)).toHaveValue('');
   }
 }
 
@@ -252,7 +295,7 @@ export function sendReaction({
   to,
   targetAuthor,
   targetMessageTimestamp,
-  emoji = '👍',
+  emoji,
   reactionTimestamp = Date.now(),
   desktop,
 }: {
@@ -260,7 +303,7 @@ export function sendReaction({
   to: PrimaryDevice | Device;
   targetAuthor: PrimaryDevice | Device;
   targetMessageTimestamp: number;
-  emoji: string;
+  emoji: Emoji.Variant;
   reactionTimestamp?: number;
   desktop: Device;
 }): Promise<void> {
@@ -352,11 +395,12 @@ export async function pinContact(
 
 export async function acceptConversation(page: Page): Promise<void> {
   await page
-    .locator('.module-message-request-actions button >> "Accept"')
+    .getByTestId('message-request-actions')
+    .getByRole('button', { name: 'Accept' })
     .click();
 
   const confirmationButton = page
-    .locator('.MessageRequestActionsConfirmation')
+    .getByRole('alertdialog', { name: 'Accept request?' })
     .getByRole('button', { name: 'Accept' });
 
   await confirmationButton.waitFor({
@@ -416,6 +460,10 @@ export async function composerAttachFiles(
   );
 }
 
+export function getLoadedImagesInside(parent: Locator): Locator {
+  return parent.locator('img.module-image__image[data-loaded="true"]');
+}
+
 export async function sendMessageWithAttachments(
   page: Page,
   receiver: PrimaryDevice,
@@ -433,14 +481,13 @@ export async function sendMessageWithAttachments(
   await input.press('Enter');
 
   const Message = getTimelineMessageWithText(page, text);
-  const MessageImageLoaded = Message.locator('.module-image__image');
 
   await Message.waitFor();
 
   await Promise.all(
     filePaths.map(async (_, index) => {
       debug(`waiting for ${index} image to render in timeline`);
-      await MessageImageLoaded.nth(index).waitFor({
+      await getLoadedImagesInside(Message).nth(index).waitFor({
         state: 'visible',
       });
     })
@@ -470,8 +517,10 @@ export async function sendMessageWithAttachments(
         }
       }
     })(),
-    10 * SECOND,
-    'Timed out waiting to detect message send with attached files'
+    {
+      milliseconds: 10 * SECOND,
+      message: 'Timed out waiting to detect message send with attached files',
+    }
   );
 }
 
@@ -491,7 +540,7 @@ export async function createCallLink(
   page: Page,
   {
     name,
-    isAdminApprovalRequired = undefined,
+    isAdminApprovalRequired,
   }: { name: string; isAdminApprovalRequired?: boolean | undefined }
 ): Promise<string | undefined> {
   await page.locator('[data-testid="NavTabsItem--Calls"]').click();
@@ -502,23 +551,25 @@ export async function createCallLink(
     .getByText('Create a Call Link')
     .click();
 
-  const editModal = page.locator('.CallLinkEditModal');
+  const editModal = page.getByRole('dialog', { name: 'Call link details' });
   await editModal.waitFor();
 
   if (isAdminApprovalRequired !== undefined) {
-    const restrictionsInput = editModal.getByLabel('Require admin approval');
+    const restrictions = editModal.getByRole('switch', {
+      name: 'Require admin approval',
+    });
     if (isAdminApprovalRequired) {
-      await expect(restrictionsInput).toHaveJSProperty('value', '0');
-      await restrictionsInput.selectOption({ label: 'On' });
-      await expect(restrictionsInput).toHaveJSProperty('value', '1');
+      await expect(restrictions).toBeChecked({ checked: false });
+      await restrictions.click();
+      await expect(restrictions).toBeChecked();
     } else {
-      await expect(restrictionsInput).toHaveJSProperty('value', '0');
+      await expect(restrictions).toBeChecked({ checked: false });
     }
   }
 
-  await editModal.locator('button', { hasText: 'Add call name' }).click();
+  await editModal.getByRole('button', { name: 'Add call name' }).click();
 
-  const addNameModal = page.locator('.CallLinkAddNameModal');
+  const addNameModal = page.getByRole('dialog', { name: 'Add call name' });
   await addNameModal.waitFor();
 
   const nameInput = addNameModal.getByLabel('Call name');
@@ -532,11 +583,9 @@ export async function createCallLink(
   const doneBtn = editModal.getByText('Done');
   await doneBtn.click();
 
-  const callLinkTitle = await page
-    .locator('.CallsList__ItemTile')
-    .getByText(name);
+  const callLinkTitle = page.locator('.CallsList__ItemTile').getByText(name);
 
-  const callLinkItem = await page.locator('.CallsList__Item', {
+  const callLinkItem = page.locator('.CallsList__Item', {
     has: callLinkTitle,
   });
   const testId = await callLinkItem.getAttribute('data-testid');

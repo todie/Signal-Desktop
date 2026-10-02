@@ -58,8 +58,10 @@ import {
 } from './user.std.ts';
 import {
   getBadgeCountMutedConversations,
+  getGlobalNotifyWhileMuted,
   getPinnedConversationIds,
   getStoriesEnabled,
+  getUnreadCountBadgeType,
 } from './items.dom.ts';
 import { createLogger } from '../../logging/log.std.ts';
 import { TimelineMessageLoadingState } from '../../util/timelineUtil.std.ts';
@@ -85,6 +87,8 @@ import {
 import {
   countAllChatFoldersUnreadStats,
   countAllConversationsUnreadStats,
+  getUnreadCallsCount,
+  getUnreadCountForBadge,
 } from '../../util/countUnreadStats.std.ts';
 import type { AllChatFoldersMutedStats } from '../../util/countMutedStats.std.ts';
 import { countAllChatFoldersMutedStats } from '../../util/countMutedStats.std.ts';
@@ -92,9 +96,10 @@ import { getActiveProfile } from './notificationProfiles.dom.ts';
 import type { PinnedMessage } from '../../types/PinnedMessage.std.ts';
 import { getPinnedMessagesLimit } from '../../util/pinnedMessages.dom.ts';
 import { getSelectedConversationId, getSelectedNavTab } from './nav.std.ts';
-import { getCallHistoryUnreadCount } from './callHistory.std.ts';
+import { getCallHistoryUnreadCountsByConversationId } from './callHistory.std.ts';
 import { NavTab } from '../../types/Nav.std.ts';
 import { ReadStatus } from '../../messages/MessageReadStatus.std.ts';
+import type { Emoji } from '../../axo/emoji.std.ts';
 
 const { isNumber, pick } = lodash;
 
@@ -138,31 +143,24 @@ export const getConversationLookup = createSelector(
   }
 );
 
-export const getConversationsByServiceId = createSelector(
+const getConversationsByServiceId = createSelector(
   getConversations,
   (state: ConversationsStateType): ConversationLookupType => {
     return state.conversationsByServiceId;
   }
 );
 
-export const getConversationsByE164 = createSelector(
+const getConversationsByE164 = createSelector(
   getConversations,
   (state: ConversationsStateType): ConversationLookupType => {
     return state.conversationsByE164;
   }
 );
 
-export const getConversationsByGroupId = createSelector(
+const getConversationsByGroupId = createSelector(
   getConversations,
   (state: ConversationsStateType): ConversationLookupType => {
     return state.conversationsByGroupId;
-  }
-);
-
-export const getConversationsByUsername = createSelector(
-  getConversations,
-  (state: ConversationsStateType): ConversationLookupType => {
-    return state.conversationsByUsername;
   }
 );
 
@@ -204,23 +202,25 @@ export const getSafeConversationWithSameTitle = createSelector(
 export type TargetedMessageType = {
   id: string;
   counter: number;
+  source: TargetedMessageSource | null;
 };
 export const getTargetedMessage = createSelector(
   getConversations,
-  (state: ConversationsStateType): TargetedMessageType | undefined => {
+  (state: ConversationsStateType): TargetedMessageType | null => {
     if (!state.targetedMessage) {
-      return undefined;
+      return null;
     }
 
     return {
       id: state.targetedMessage,
       counter: state.targetedMessageCounter,
+      source: state.targetedMessageSource,
     };
   }
 );
 export const getTargetedMessageSource = createSelector(
   getConversations,
-  (state: ConversationsStateType): TargetedMessageSource | undefined => {
+  (state: ConversationsStateType): TargetedMessageSource | null => {
     return state.targetedMessageSource;
   }
 );
@@ -241,7 +241,7 @@ export const getLastSelectedMessage = createSelector(
 export const getShowArchived = createSelector(
   getConversations,
   (state: ConversationsStateType): boolean => {
-    return Boolean(state.showArchived);
+    return state.showArchived;
   }
 );
 
@@ -300,7 +300,7 @@ export const getMessagesByConversation = createSelector(
   }
 );
 
-export const getConversationMessages = createSelector(
+const getConversationMessages = createSelector(
   getSelectedConversationId,
   getMessagesByConversation,
   (
@@ -394,7 +394,7 @@ export const _getConversationComparator = () => {
     return collator.compare(left.title, right.title);
   };
 };
-export const getConversationComparator = createSelector(
+const getConversationComparator = createSelector(
   getIntl,
   getRegionCode,
   _getConversationComparator
@@ -454,6 +454,7 @@ export const _getLeftPaneLists = ({
   const conversations: Array<ConversationType> = [];
   const archivedConversations: Array<ConversationType> = [];
   const pinnedConversations: Array<ConversationType> = [];
+  const pinnedConversationIdsSet = new Set(pinnedConversationIds);
 
   for (let conversation of Object.values(conversationLookup)) {
     if (
@@ -474,7 +475,10 @@ export const _getLeftPaneLists = ({
     }
 
     // We always show pinned conversations
-    if (conversation.isPinned) {
+    if (
+      conversation.isPinned &&
+      pinnedConversationIdsSet.has(conversation.id)
+    ) {
       pinnedConversations.push(conversation);
       continue;
     }
@@ -679,7 +683,7 @@ function isTrusted(
     conversation.serviceId != null &&
     serviceIdsInGroups.has(conversation.serviceId);
 
-  return Boolean(
+  return (
     isInSystemContacts(conversation) ||
     hasSharedGroups ||
     conversation.profileSharing ||
@@ -704,7 +708,7 @@ function canComposeConversation(
   conversation: ConversationType,
   serviceIdsInGroups: Set<string>
 ): boolean {
-  return Boolean(
+  return (
     !isSignalConversation(conversation) &&
     !conversation.isBlocked &&
     !conversation.removalStage &&
@@ -733,6 +737,11 @@ export const getAllComposableConversations = createSelector(
         conversation.titleNoDefault &&
         hasDisplayInfo(conversation)
     )
+);
+
+export const getAllConversationsForNotificationProfiles = createSelector(
+  getAllComposableConversations,
+  conversations => conversations.filter(convo => !convo.isMe)
 );
 
 export const getAllGroupsWithInviteAccess = createSelector(
@@ -766,22 +775,14 @@ export const getAllChatFoldersUnreadStats: StateSelector<AllChatFoldersUnreadSta
   createSelector(
     getCurrentChatFolders,
     getAllConversations,
-    getBadgeCountMutedConversations,
     getActiveProfile,
-    (
-      currentChatFolders,
-      allConversations,
-      badgeCountMutedConversations,
-      activeProfile
-    ) => {
+    (currentChatFolders, allConversations, activeProfile) => {
       return countAllChatFoldersUnreadStats(
         currentChatFolders,
         allConversations,
         {
           activeProfile,
-          includeMuted: badgeCountMutedConversations
-            ? 'setting-on'
-            : 'setting-off',
+          includeMuted: 'force-include',
         }
       );
     }
@@ -811,6 +812,7 @@ export const getAllChatFoldersMutedStats: StateSelector<AllChatFoldersMutedStats
  * Because they filter unregistered contacts and that's (partially) determined by the
  * current time, it's possible for them to return stale contacts that have unregistered
  * if no other conversations change. This should be a rare false positive.
+ * @testexport
  */
 export const getComposableContacts = createSelector(
   getConversationLookup,
@@ -1031,7 +1033,7 @@ export const getComposeSelectedContacts = createSelector(
 //   2) all of the message selectors need to be reselect-based; today those
 //      model-based prop-generation functions expect to get Conversation information
 //      directly via ConversationController
-export function _conversationSelector(
+function _conversationSelector(
   conversation?: ConversationType
   // regionCode: string,
   // userNumber: string
@@ -1048,7 +1050,7 @@ export function _conversationSelector(
 type CachedConversationSelectorType = (
   conversation?: ConversationType
 ) => ConversationType;
-export const getCachedSelectorForConversation = createSelector(
+const getCachedSelectorForConversation = createSelector(
   getRegionCode,
   getUserNumber,
   (): CachedConversationSelectorType => {
@@ -1061,7 +1063,7 @@ export const getCachedSelectorForConversation = createSelector(
 export type GetConversationByAnyIdSelectorType = (
   id?: string
 ) => ConversationType | undefined;
-export const getConversationByAnyIdSelector = createSelector(
+const getConversationByAnyIdSelector = createSelector(
   getConversationLookup,
   getConversationsByServiceId,
   getConversationsByE164,
@@ -1150,7 +1152,7 @@ export const getCachedConversationMemberColorsSelector = createSelector(
   ) => {
     return memoizee(
       (conversationId: string | undefined) => {
-        const contactNameColors: Map<string, ContactNameColorType> = new Map();
+        const contactNameColors = new Map<string, ContactNameColorType>();
         const {
           membersV2 = [],
           type,
@@ -1228,7 +1230,7 @@ export const getContactNameColor = (
 type TimelinePropsWithRawItems = Omit<TimelinePropsType, 'items'> & {
   items: ReadonlyArray<string>;
 };
-export function _conversationMessagesSelector(
+function _conversationMessagesSelector(
   conversation: ConversationMessageType
 ): TimelinePropsWithRawItems {
   const {
@@ -1282,7 +1284,7 @@ export function _conversationMessagesSelector(
 type CachedConversationMessagesSelectorType = (
   conversation: ConversationMessageType
 ) => TimelinePropsWithRawItems;
-export const getCachedSelectorForConversationMessages = createSelector(
+const getCachedSelectorForConversationMessages = createSelector(
   getRegionCode,
   getUserNumber,
   (): CachedConversationMessagesSelectorType => {
@@ -1362,7 +1364,7 @@ export function isMissingRequiredProfileSharing(
 
 export type AdminMembershipType = {
   member: ConversationType;
-  labelEmoji: string | undefined;
+  labelEmoji: Emoji.Variant | undefined;
   labelString: string | undefined;
 };
 export const getGroupAdminsSelector = createSelector(
@@ -1477,7 +1479,7 @@ export const getHideStoryConversationIds = createSelector(
 export const getStoriesState = (state: StateType): StoriesStateType =>
   state.stories;
 
-export const getStoriesNotificationCount = createSelector(
+const getStoriesNotificationCount = createSelector(
   getStoriesEnabled,
   getHideStoryConversationIds,
   getStoriesState,
@@ -1506,42 +1508,61 @@ export const getStoriesNotificationCount = createSelector(
   }
 );
 
-export const getOtherTabsUnreadStats = createSelector(
+export const getCallHistoryUnreadCount: StateSelector<number> = createSelector(
+  getCallHistoryUnreadCountsByConversationId,
+  getConversationLookup,
+  getBadgeCountMutedConversations,
+  getGlobalNotifyWhileMuted,
+  getActiveProfile,
+  (
+    unreadCountsByConversationId,
+    conversationLookup,
+    badgeCountMutedConversations,
+    globalNotifyWhileMuted,
+    activeProfile
+  ) => {
+    return getUnreadCallsCount({
+      unreadCountsByConversationId,
+      conversationLookup,
+      badgeCountMutedConversations,
+      globalNotifyWhileMuted,
+      activeProfile,
+    });
+  }
+);
+
+export const getOtherTabsUnreadCount = createSelector(
   getSelectedNavTab,
   getAllConversationsUnreadStats,
+  getUnreadCountBadgeType,
   getCallHistoryUnreadCount,
   getStoriesNotificationCount,
   (
     selectedNavTab,
     conversationsUnreadStats,
+    unreadCountBadgeType,
     callHistoryUnreadCount,
     storiesNotificationCount
-  ): UnreadStats => {
-    let unreadCount = 0;
-    let unreadMentionsCount = 0;
-    let readChatsMarkedUnreadCount = 0;
+  ): number => {
+    let count = 0;
 
     if (selectedNavTab !== NavTab.Chats) {
-      unreadCount += conversationsUnreadStats.unreadCount;
-      unreadMentionsCount += conversationsUnreadStats.unreadMentionsCount;
-      readChatsMarkedUnreadCount +=
-        conversationsUnreadStats.readChatsMarkedUnreadCount;
+      count += getUnreadCountForBadge(
+        conversationsUnreadStats,
+        unreadCountBadgeType
+      );
     }
 
     // Note: Conversation unread stats includes the call history unread count.
     if (selectedNavTab !== NavTab.Calls) {
-      unreadCount += callHistoryUnreadCount;
+      count += callHistoryUnreadCount;
     }
 
     if (selectedNavTab !== NavTab.Stories) {
-      unreadCount += storiesNotificationCount;
+      count += storiesNotificationCount;
     }
 
-    return {
-      unreadCount,
-      unreadMentionsCount,
-      readChatsMarkedUnreadCount,
-    };
+    return count;
   }
 );
 

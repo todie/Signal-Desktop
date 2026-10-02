@@ -1,16 +1,19 @@
 // Copyright 2019 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import React, {
+import {
   memo,
   useCallback,
   useEffect,
+  useEffectEvent,
   useMemo,
   useRef,
   useState,
+  type JSX,
 } from 'react';
 import classNames from 'classnames';
 import type { ReadonlyDeep } from 'type-fest';
+import { tinykeys } from 'tinykeys';
 import type {
   DraftBodyRanges,
   HydratedBodyRangesType,
@@ -58,14 +61,9 @@ import { MandatoryProfileSharingActions } from './conversation/MandatoryProfileS
 import { MediaQualitySelector } from './MediaQualitySelector.dom.tsx';
 import type { Props as QuoteProps } from './conversation/Quote.dom.tsx';
 import { Quote } from './conversation/Quote.dom.tsx';
-import {
-  useAttachFileShortcut,
-  useEditLastMessageSent,
-} from '../hooks/useKeyboardShortcuts.dom.tsx';
+import { useHasAnyOverlay } from '../hooks/useKeyboardShortcuts.dom.tsx';
 import { MediaEditor } from './MediaEditor.dom.tsx';
 import { isImageTypeSupported } from '../util/GoogleChrome.std.ts';
-import * as KeyboardLayout from '../services/keyboardLayout.dom.ts';
-import { usePrevious } from '../hooks/usePrevious.std.ts';
 import { PanelType } from '../types/Panels.std.ts';
 import type { SmartCompositionRecordingDraftProps } from '../state/smart/CompositionRecordingDraft.preload.tsx';
 import { useEscapeHandling } from '../hooks/useEscapeHandling.dom.ts';
@@ -74,24 +72,22 @@ import type { ShowToastAction } from '../state/ducks/toast.preload.ts';
 import type { DraftEditMessageType } from '../model-types.d.ts';
 import type { ForwardMessagesPayload } from '../state/ducks/globalModals.preload.ts';
 import { ForwardMessagesModalType } from './ForwardMessagesModal.dom.tsx';
-import { SignalConversationMuteToggle } from './conversation/SignalConversationMuteToggle.dom.tsx';
 import { FunPicker } from './fun/FunPicker.dom.tsx';
 import type { FunEmojiSelection } from './fun/panels/FunPanelEmojis.dom.tsx';
 import type { FunStickerSelection } from './fun/panels/FunPanelStickers.dom.tsx';
 import type { FunGifSelection } from './fun/panels/FunPanelGifs.dom.tsx';
 import type { SmartDraftGifMessageSendModalProps } from '../state/smart/DraftGifMessageSendModal.preload.tsx';
 import { strictAssert } from '../util/assert.std.ts';
-import { ConfirmationDialog } from './ConfirmationDialog.dom.tsx';
-import type { EmojiSkinTone } from './fun/data/emojis.std.ts';
 import { FunPickerButton } from './fun/FunButton.dom.tsx';
 import { AxoDropdownMenu } from '../axo/AxoDropdownMenu.dom.tsx';
 import { AxoIconButton } from '../axo/AxoIconButton.dom.tsx';
 import { tw } from '../axo/tw.dom.tsx';
 import type { PollCreateType } from '../types/Polls.dom.ts';
 import { PollCreateModal } from './PollCreateModal.dom.tsx';
-import { useDocumentKeyDown } from '../hooks/useDocumentKeyDown.dom.ts';
 import { hasDraft } from '../util/hasDraft.std.ts';
 import type { ContactNameColorType } from '../types/Colors.std.ts';
+import type { Emoji } from '../axo/emoji.std.ts';
+import { AxoConfirmDialog } from '../axo/AxoConfirmDialog.dom.tsx';
 
 export type OwnProps = Readonly<{
   acceptedMessageRequest: boolean | null;
@@ -123,7 +119,7 @@ export type OwnProps = Readonly<{
   focusCounter: number;
   groupAdmins: Array<{
     member: ConversationType;
-    labelEmoji: string | undefined;
+    labelEmoji: Emoji.Variant | undefined;
     labelString: string | undefined;
   }>;
   groupVersion: 1 | 2 | null;
@@ -135,34 +131,32 @@ export type OwnProps = Readonly<{
   isGroupV1AndDisabled: boolean | null;
   isMissingMandatoryProfileSharing: boolean | null;
   isPollSend1to1Enabled: boolean;
-  isSignalConversation: boolean | null;
+  isSignalConversation: boolean;
   isActive: boolean;
   lastEditableMessageId: string | null;
   recordingState: RecordingState;
-  messageCompositionId: string;
   memberColors: Map<string, ContactNameColorType>;
   shouldHidePopovers: boolean | null;
-  isMuted: boolean;
   isSmsOnlyOrUnregistered: boolean | null;
   left: boolean | null;
   linkPreviewLoading: boolean;
   linkPreviewResult: LinkPreviewForUIType | null;
-  onClearAttachments(conversationId: string): unknown;
-  onCloseLinkPreview(conversationId: string): unknown;
+  onClearAttachments: (conversationId: string) => unknown;
+  onCloseLinkPreview: (conversationId: string) => unknown;
   platform: string;
+  textIncludesRecoveryKey: (text: string) => boolean;
   showToast: ShowToastAction;
   processAttachments: (options: {
     conversationId: string;
     files: ReadonlyArray<File>;
     flags: number | null;
   }) => unknown;
-  setMuteExpiration(conversationId: string, muteExpiresAt: number): unknown;
-  setMediaQualitySetting(conversationId: string, isHQ: boolean): unknown;
-  sendStickerMessage(
+  setMediaQualitySetting: (conversationId: string, isHQ: boolean) => unknown;
+  sendStickerMessage: (
     id: string,
     opts: { packId: string; stickerId: number }
-  ): unknown;
-  sendEditedMessage(
+  ) => unknown;
+  sendEditedMessage: (
     conversationId: string,
     options: {
       bodyRanges?: DraftBodyRanges;
@@ -171,8 +165,8 @@ export type OwnProps = Readonly<{
       quoteSentAt?: number;
       targetMessageId: string;
     }
-  ): unknown;
-  sendMultiMediaMessage(
+  ) => unknown;
+  sendMultiMediaMessage: (
     conversationId: string,
     options: {
       draftAttachments?: ReadonlyArray<AttachmentDraftType>;
@@ -182,8 +176,8 @@ export type OwnProps = Readonly<{
       timestamp?: number;
       voiceNoteAttachment?: InMemoryAttachmentDraftType;
     }
-  ): unknown;
-  sendPoll(conversationId: string, poll: PollCreateType): unknown;
+  ) => unknown;
+  sendPoll: (conversationId: string, poll: PollCreateType) => unknown;
   quotedMessageId: string | null;
   quotedMessageProps: null | ReadonlyDeep<
     Omit<
@@ -200,26 +194,27 @@ export type OwnProps = Readonly<{
   ) => unknown;
   scrollToMessage: (conversationId: string, messageId: string) => unknown;
   setComposerFocus: (conversationId: string) => unknown;
-  setMessageToEdit(conversationId: string, messageId: string): unknown;
-  setQuoteByMessageId(
+  setMessageToEdit: (conversationId: string, messageId: string) => unknown;
+  setQuoteByMessageId: (
     conversationId: string,
     messageId: string | undefined
-  ): unknown;
+  ) => unknown;
   isViewOnce: boolean;
-  setViewOnce(options: {
+  setViewOnce: (options: {
     conversationId: string;
     value: boolean;
     toastNotify: boolean;
-  }): unknown;
+  }) => unknown;
   shouldSendHighQualityAttachments: boolean;
   showConversation: ShowConversationType;
+  warmupRecording: () => void;
   startRecording: (id: string) => unknown;
   terminated: boolean | null;
   theme: ThemeType;
-  renderSmartCompositionRecording: () => React.JSX.Element;
+  renderSmartCompositionRecording: () => JSX.Element;
   renderSmartCompositionRecordingDraft: (
     props: SmartCompositionRecordingDraftProps
-  ) => React.JSX.Element | null;
+  ) => JSX.Element | null;
   selectedMessageIds: ReadonlyArray<string> | undefined;
   areSelectedMessagesForwardable: boolean | undefined;
   toggleSelectMode: (on: boolean) => void;
@@ -232,7 +227,7 @@ export type OwnProps = Readonly<{
   ) => void;
 
   onSelectEmoji: (emojiSelection: FunEmojiSelection) => void;
-  emojiSkinToneDefault: EmojiSkinTone | null;
+  emojiSkinToneDefault: Emoji.SkinTone | null;
 }>;
 
 export type Props = Pick<
@@ -266,12 +261,11 @@ export const CompositionArea = memo(function CompositionArea({
   isDisabled,
   isPollSend1to1Enabled,
   isSignalConversation,
-  isMuted,
   isActive,
   lastEditableMessageId,
-  messageCompositionId,
   pushPanelForConversation,
   platform,
+  textIncludesRecoveryKey,
   processAttachments,
   removeAttachment,
   sendEditedMessage,
@@ -283,7 +277,6 @@ export const CompositionArea = memo(function CompositionArea({
   shouldHidePopovers,
   showToast,
   theme,
-  setMuteExpiration,
 
   // AttachmentList
   draftAttachments,
@@ -291,6 +284,7 @@ export const CompositionArea = memo(function CompositionArea({
   // AudioCapture
   recordingState,
   startRecording,
+  warmupRecording,
   // StagedLinkPreview
   linkPreviewLoading,
   linkPreviewResult,
@@ -364,7 +358,7 @@ export const CompositionArea = memo(function CompositionArea({
   toggleForwardMessagesModal,
   // DraftGifMessageSendModal
   toggleDraftGifMessageSendModal,
-}: Props): React.JSX.Element | null {
+}: Props): JSX.Element | null {
   const [dirty, setDirty] = useState(false);
   const [large, setLarge] = useState(false);
   const [attachmentToEdit, setAttachmentToEdit] = useState<
@@ -520,95 +514,103 @@ export const CompositionArea = memo(function CompositionArea({
     setMessageToEdit,
   ]);
 
-  const attachFileShortcut = useAttachFileShortcut(launchFilePicker);
-  const editLastMessageSent = useEditLastMessageSent(maybeEditMessage);
-  useDocumentKeyDown(event => {
-    const hasFocus = inputApiRef.current?.hasFocus() ?? false;
-    if (hasFocus) {
-      attachFileShortcut(event);
-      editLastMessageSent(event);
-    }
-  });
-
   // Focus input on first mount
-  const previousFocusCounter = usePrevious<number | undefined>(
-    focusCounter,
-    focusCounter
-  );
   useEffect(() => {
     if (inputApiRef.current) {
       inputApiRef.current.focus();
     }
   }, []);
-  // Focus input whenever explicitly requested
-  useEffect(() => {
-    if (focusCounter !== previousFocusCounter && inputApiRef.current) {
-      inputApiRef.current.focus();
-    }
-  }, [inputApiRef, focusCounter, previousFocusCounter]);
 
-  const previousMessageCompositionId = usePrevious(
-    messageCompositionId,
-    messageCompositionId
-  );
-  const previousSendCounter = usePrevious(sendCounter, sendCounter);
+  // Focus input whenever explicitly requested
+  const inputFocusedRef = useRef({ focusCounter });
+  useEffect(() => {
+    if (
+      inputApiRef.current &&
+      inputFocusedRef.current.focusCounter !== focusCounter
+    ) {
+      inputApiRef.current.focus();
+      inputFocusedRef.current = { focusCounter };
+    }
+  }, [inputApiRef, focusCounter]);
+
+  const inputResetRef = useRef({ sendCounter, conversationId });
   useEffect(() => {
     if (!inputApiRef.current) {
       return;
     }
+
     if (
-      previousMessageCompositionId !== messageCompositionId ||
-      previousSendCounter !== sendCounter
+      inputResetRef.current.sendCounter !== sendCounter ||
+      inputResetRef.current.conversationId !== conversationId
     ) {
       inputApiRef.current.reset();
+      inputResetRef.current = {
+        sendCounter,
+        conversationId,
+      };
     }
-  }, [
-    messageCompositionId,
-    sendCounter,
-    previousMessageCompositionId,
-    previousSendCounter,
-  ]);
+  }, [conversationId, sendCounter]);
 
   // We want to reset the state of Quill only if:
   //
   // - Our other device edits the message (edit history length would change)
   // - User begins editing another message.
-  const editHistoryLength = draftEditMessage?.editHistoryLength;
-  const hasEditHistoryChanged =
-    usePrevious(editHistoryLength, editHistoryLength) !== editHistoryLength;
-  const hasEditedMessageChanged =
-    usePrevious(editedMessageId, editedMessageId) !== editedMessageId;
+  const editDraftContentsSetRef = useRef<{
+    targetMessageId: string;
+    editHistoryLength: number;
+  }>(null);
 
-  const hasEditDraftChanged = hasEditHistoryChanged || hasEditedMessageChanged;
   useEffect(() => {
-    if (!hasEditDraftChanged) {
+    if (!inputApiRef.current) {
       return;
     }
 
-    inputApiRef.current?.setContents(
-      draftEditMessageBody ?? '',
-      draftBodyRanges ?? undefined,
-      true
-    );
-  }, [draftBodyRanges, draftEditMessageBody, hasEditDraftChanged]);
+    if (
+      editDraftContentsSetRef.current?.targetMessageId !==
+        draftEditMessage?.targetMessageId ||
+      editDraftContentsSetRef.current?.editHistoryLength !==
+        draftEditMessage?.editHistoryLength
+    ) {
+      inputApiRef.current.setContents(
+        draftEditMessageBody ?? '',
+        draftBodyRanges ?? undefined,
+        true
+      );
+      editDraftContentsSetRef.current = draftEditMessage
+        ? {
+            targetMessageId: draftEditMessage.targetMessageId,
+            editHistoryLength: draftEditMessage.editHistoryLength,
+          }
+        : null;
+    }
+  }, [draftBodyRanges, draftEditMessageBody, draftEditMessage]);
 
-  const previousConversationId = usePrevious(conversationId, conversationId);
+  const setDraftTextRef = useRef<{ conversationId: string }>(null);
   useEffect(() => {
-    if (conversationId === previousConversationId) {
+    if (setDraftTextRef.current?.conversationId === conversationId) {
       return;
     }
+    // oxlint-disable-next-line react/todo
+    try {
+      if (!draftText) {
+        inputApiRef.current?.setContents('');
+        return;
+      }
 
-    if (!draftText) {
-      inputApiRef.current?.setContents('');
-      return;
+      inputApiRef.current?.setContents(
+        draftText,
+        draftBodyRanges ?? undefined,
+        true
+      );
+    } finally {
+      setDraftTextRef.current = { conversationId };
     }
-
-    inputApiRef.current?.setContents(
-      draftText,
-      draftBodyRanges ?? undefined,
-      true
-    );
-  }, [conversationId, draftBodyRanges, draftText, previousConversationId]);
+  }, [
+    conversationId,
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies
+    draftBodyRanges,
+    draftText,
+  ]);
 
   const handleToggleLarge = useCallback(() => {
     setLarge(l => !l);
@@ -616,6 +618,7 @@ export const CompositionArea = memo(function CompositionArea({
 
   const shouldShowMicrophone =
     !large &&
+    draftEditMessage == null &&
     !hasDraft({
       draft: draftText,
       draftAttachments,
@@ -761,27 +764,20 @@ export const CompositionArea = memo(function CompositionArea({
 
   const leftHandSideButtonsFragment = (
     <>
-      {confirmGifSelection && (
-        <ConfirmationDialog
-          i18n={i18n}
-          dialogName="CompositionArea.ConfirmGifSelection"
-          hasXButton={false}
-          onClose={handleCancelGifSelection}
-          onCancel={handleCancelGifSelection}
-          title={i18n('icu:CompositionArea__ConfirmGifSelection__Title')}
-          actions={[
-            {
-              action: handleConfirmGifSelection,
-              style: 'affirmative',
-              text: i18n(
-                'icu:CompositionArea__ConfirmGifSelection__ReplaceButton'
-              ),
-            },
-          ]}
+      <AxoConfirmDialog.Root
+        open={confirmGifSelection != null}
+        onOpenChange={handleCancelGifSelection}
+        title={i18n('icu:CompositionArea__ConfirmGifSelection__Title')}
+        description={i18n('icu:CompositionArea__ConfirmGifSelection__Body')}
+      >
+        <AxoConfirmDialog.Cancel />
+        <AxoConfirmDialog.Action
+          variant="strong-primary"
+          onClick={handleConfirmGifSelection}
         >
-          {i18n('icu:CompositionArea__ConfirmGifSelection__Body')}
-        </ConfirmationDialog>
-      )}
+          {i18n('icu:CompositionArea__ConfirmGifSelection__ReplaceButton')}
+        </AxoConfirmDialog.Action>
+      </AxoConfirmDialog.Root>
       <div
         aria-hidden={isViewOnceActive || undefined}
         className={classNames(
@@ -790,6 +786,7 @@ export const CompositionArea = memo(function CompositionArea({
         )}
       >
         <FunPicker
+          isReply={Boolean(quotedMessageId)}
           placement="top start"
           open={funPickerOpen}
           onOpenChange={handleFunPickerOpenChange}
@@ -812,6 +809,7 @@ export const CompositionArea = memo(function CompositionArea({
         draftAttachments={draftAttachments}
         i18n={i18n}
         showToast={showToast}
+        warmupRecording={warmupRecording}
         startRecording={startRecording}
       />
     </div>
@@ -850,7 +848,7 @@ export const CompositionArea = memo(function CompositionArea({
           <div className={actionSlotClassName}>
             <AxoDropdownMenu.Trigger>
               <AxoIconButton.Root
-                variant="borderless-secondary"
+                variant="implied-secondary"
                 size="md"
                 label={i18n('icu:CompositionArea--attach-plus')}
                 tooltip={false}
@@ -883,41 +881,80 @@ export const CompositionArea = memo(function CompositionArea({
       <div className="CompositionArea__placeholder" />
       <div className="CompositionArea__button-cell">
         <div className={actionSlotClassName}>
-          <button
-            type="button"
-            className="CompositionArea__send-button"
+          <AxoIconButton.Root
+            symbol="send-fill"
+            variant="strong-primary"
+            size="md"
+            label={i18n('icu:sendMessageToContact')}
             onClick={handleForceSend}
-            aria-label={i18n('icu:sendMessageToContact')}
           />
         </div>
       </div>
     </>
   ) : null;
 
-  // Listen for cmd/ctrl-shift-x to toggle large composition mode
+  const hasOverlay = useHasAnyOverlay();
+
+  function isComposerFocused() {
+    return inputApiRef.current?.hasFocus() ?? false;
+  }
+
+  const onToggleLargeShortcut = useEffectEvent((event: KeyboardEvent) => {
+    if (hasOverlay) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    setLarge(x => !x);
+  });
+
+  const onEditLastMessageShortcut = useEffectEvent((event: KeyboardEvent) => {
+    if (hasOverlay) {
+      return;
+    }
+    // Ignore keys that are part of an active IME composition (e.g. when
+    // navigating the Japanese transliteration candidate menu with ArrowUp).
+    if (event.isComposing) {
+      return;
+    }
+
+    if (!isComposerFocused()) {
+      return;
+    }
+
+    const didStartEditing = maybeEditMessage();
+    if (didStartEditing) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  });
+
+  const onAttachFileShortcut = useEffectEvent((event: KeyboardEvent) => {
+    if (hasOverlay) {
+      return;
+    }
+    if (!isComposerFocused()) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    launchFilePicker();
+  });
+
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      const { shiftKey, ctrlKey, metaKey } = e;
-      const key = KeyboardLayout.lookup(e);
-      // When using the ctrl key, `key` is `'K'`. When using the cmd key, `key` is `'k'`
-      const targetKey = key === 'k' || key === 'K';
-      const commandKey = platform === 'darwin' && metaKey;
-      const controlKey = platform !== 'darwin' && ctrlKey;
-      const commandOrCtrl = commandKey || controlKey;
-
-      // cmd/ctrl-shift-k
-      if (targetKey && shiftKey && commandOrCtrl) {
-        e.preventDefault();
-        setLarge(x => !x);
+    return tinykeys(
+      window,
+      {
+        ArrowUp: onEditLastMessageShortcut,
+        '$mod+U': onAttachFileShortcut,
+        '$mod+Shift+K': onToggleLargeShortcut,
+      },
+      {
+        // Override default ignore so shortcuts work while textboxes are focused
+        ignore: () => false,
       }
-    };
-
-    document.addEventListener('keydown', handler);
-
-    return () => {
-      document.removeEventListener('keydown', handler);
-    };
-  }, [platform, setLarge]);
+    );
+  }, []);
 
   const handleEscape = useCallback(() => {
     if (linkPreviewResult) {
@@ -938,17 +975,6 @@ export const CompositionArea = memo(function CompositionArea({
   ]);
 
   useEscapeHandling(handleEscape);
-
-  if (isSignalConversation) {
-    return (
-      <SignalConversationMuteToggle
-        conversationId={conversationId}
-        isMuted={isMuted}
-        i18n={i18n}
-        setMuteExpiration={setMuteExpiration}
-      />
-    );
-  }
 
   if (selectedMessageIds != null) {
     return (
@@ -986,13 +1012,18 @@ export const CompositionArea = memo(function CompositionArea({
     );
   }
 
+  if (isSignalConversation) {
+    return null;
+  }
+
   if (terminated) {
     return (
       <div
         className={tw(
-          'border-t border-border-primary py-[16px]',
-          'text-center type-body-small text-label-secondary select-none'
+          'border-t border-primary py-[16px]',
+          'text-center type-body-small text-secondary'
         )}
+        data-testid="CompositionArea--group-terminated"
       >
         {i18n('icu:CompositionArea--group-terminated')}
       </div>
@@ -1292,6 +1323,7 @@ export const CompositionArea = memo(function CompositionArea({
             linkPreviewLoading={linkPreviewLoadingForInput}
             linkPreviewResult={linkPreviewResultForInput}
             quotedMessageId={quotedMessageIdForInput}
+            showRecoveryKeyPasteWarning={textIncludesRecoveryKey}
             onCloseLinkPreview={onCloseLinkPreview}
             onDirtyChange={setDirty}
             onEditorStateChange={onEditorStateChange}
@@ -1313,11 +1345,12 @@ export const CompositionArea = memo(function CompositionArea({
         {isViewOnceActive && (
           <div className="CompositionArea__button-cell">
             <div className={actionSlotClassName}>
-              <button
-                type="button"
-                className="CompositionArea__send-button"
+              <AxoIconButton.Root
+                size="md"
+                variant="strong-primary"
+                symbol="send-fill"
+                label={i18n('icu:sendMessageToContact')}
                 onClick={handleForceSend}
-                aria-label={i18n('icu:sendMessageToContact')}
               />
             </div>
           </div>

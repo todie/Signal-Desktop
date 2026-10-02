@@ -1,9 +1,12 @@
 // Copyright 2026 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
+// @ts-check
 
 import { rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { defineConfig } from 'rolldown';
+import type { RolldownOptions } from 'rolldown';
+import { transform } from 'oxc-transform';
 
 const external = [
   // Native libraries
@@ -23,7 +26,6 @@ const external = [
   'sass',
 
   // Large libraries (3.7mb total)
-  'emoji-datasource',
   'google-libphonenumber',
 
   // Imported, but not used in production builds
@@ -38,44 +40,56 @@ const external = [
 
 const isProd = process.argv.some(arg => arg === '--minify');
 
-const transform = {
-  define: {
-    'process.env.NODE_ENV': isProd ? '"production"' : '"development"',
-    'process.env.IS_BUNDLED': 'true',
-  },
-};
-
-const nonIsolated = {
-  // Preloads
-  'preload/wrapper': 'preload.wrapper.ts',
-  'preload/main': 'ts/windows/main/preload.preload.ts',
-
-  // Workers
-  'workers/sql': 'ts/sql/mainWorker.node.ts',
-  'workers/heic': 'ts/workers/heicConverterWorker.node.ts',
-};
-
-const contextIsolated = {
+const sandboxPreload = {
   // Preload
   'preload/about': 'ts/windows/about/preload.preload.ts',
   'preload/calldiagnostic': 'ts/windows/calldiagnostic/preload.preload.ts',
   'preload/debuglog': 'ts/windows/debuglog/preload.preload.ts',
+  'preload/pdf': 'ts/windows/pdf/preload.preload.ts',
   'preload/permissions': 'ts/windows/permissions/preload.preload.ts',
   'preload/screenShare': 'ts/windows/screenShare/preload.preload.ts',
   'preload/sticker-creator': 'ts/windows/sticker-creator/preload.preload.ts',
 };
 
-const contextIsolatedDom = {
+const sandboxDOM = {
   'dom/about': 'ts/windows/about/app.dom.tsx',
   'dom/calldiagnostic': 'ts/windows/calldiagnostic/app.dom.tsx',
   'dom/debuglog': 'ts/windows/debuglog/app.dom.tsx',
   'dom/loading': 'ts/windows/loading/start.dom.ts',
+  'dom/pdf': 'ts/windows/pdf/app.dom.tsx',
   'dom/permissions': 'ts/windows/permissions/app.dom.tsx',
   'dom/screenShare': 'ts/windows/screenShare/app.dom.tsx',
 };
 
 const defaults = {
-  transform,
+  transform: {
+    jsx: 'react-jsx',
+    define: {
+      'process.env.IS_BUNDLED': 'true',
+    },
+  },
+  plugins: [
+    {
+      name: 'NODE_ENV',
+      transform(code, id) {
+        if (id.endsWith('.json')) {
+          return;
+        }
+
+        const path = relative(__dirname, id);
+        if (path.startsWith('app')) {
+          return;
+        }
+
+        return transform(id, code, {
+          define: {
+            'process.env.NODE_ENV': isProd ? '"production"' : '"development"',
+          },
+          sourcemap: !isProd,
+        });
+      },
+    },
+  ],
   external,
   output: {
     format: 'cjs',
@@ -85,27 +99,53 @@ const defaults = {
     generatedCode: {
       symbols: false,
     },
+    sourcemap: !isProd,
+    sourcemapBaseUrl: 'bundles:///',
+    postBanner: ({ fileName }) => {
+      // See preload.wrapper.ts
+      if (fileName === 'preload/main.js') {
+        return '(function(require, __dirname, exports){';
+      }
+
+      return '';
+    },
+    postFooter: ({ fileName }) => {
+      const lines = new Array<string>();
+
+      // See preload.wrapper.ts
+      if (fileName === 'preload/main.js') {
+        lines.push('})');
+      }
+
+      lines.push(`//# sourceURL=bundles:///${fileName}`);
+
+      return lines.join('\n');
+    },
   },
-};
+  watch: {
+    clearScreen: false,
+  },
+} satisfies RolldownOptions;
 
 if (isProd) {
   try {
     rmSync(join(__dirname, 'bundles'), { recursive: true });
   } catch (error) {
-    if (error.code !== 'ENOENT') {
+    if (
+      typeof error === 'object' &&
+      error != null &&
+      'code' in error &&
+      error.code !== 'ENOENT'
+    ) {
       throw error;
     }
   }
 }
 
 export default defineConfig([
-  {
-    ...defaults,
-    input: nonIsolated,
-  },
-  // Each context isolated bundle has to be separate from the rest since
+  // Each sandboxed bundle has to be separate from the rest since
   // they cannot use `require()`
-  ...Object.entries(contextIsolated).map(([key, value]) => {
+  ...Object.entries(sandboxPreload).map(([key, value]): RolldownOptions => {
     return {
       ...defaults,
       external: ['electron'],
@@ -121,7 +161,7 @@ export default defineConfig([
     ...defaults,
     external: ['electron'],
     platform: 'browser',
-    input: contextIsolatedDom,
+    input: sandboxDOM,
     output: {
       ...defaults.output,
       format: 'es',
@@ -130,17 +170,41 @@ export default defineConfig([
   {
     ...defaults,
 
-    // Main
     input: {
+      // Main
       main: 'app/main.main.ts',
       config: 'app/config.main.js',
-    },
 
-    // Do not override process.env.NODE_ENV in main process
+      // Preloads
+      'preload/wrapper': 'preload.wrapper.ts',
+      'preload/main': 'ts/windows/main/preload.preload.ts',
+
+      // Workers
+      'workers/sql': 'ts/sql/mainWorker.node.ts',
+      'workers/heic': 'ts/workers/heicConverterWorker.node.ts',
+    },
+  },
+
+  // Voice Note Worker
+  {
+    input: 'ts/workers/mp3Encoder.std.ts',
     transform: {
       define: {
-        'process.env.IS_BUNDLED': 'true',
+        process: 'undefined',
+        require: 'undefined',
+        eval: 'undefined',
       },
+    },
+    output: {
+      file: 'bundles/workers/mp3Encoder.js',
+      exports: 'named',
+      generatedCode: {
+        symbols: false,
+      },
+      codeSplitting: false,
+    },
+    watch: {
+      clearScreen: false,
     },
   },
 ]);

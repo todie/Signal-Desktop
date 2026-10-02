@@ -47,9 +47,9 @@ describe('storage service', function (this: Mocha.Suite) {
       debug('Unpinning group via storage service');
       {
         const state = await phone.expectStorageState('initial state');
-        const newState = state.unpinGroup(group);
+        const modifiedState = state.unpinGroup(group);
 
-        await phone.setStorageState(newState);
+        const newState = await phone.setStorageState(modifiedState);
         await phone.sendFetchStorage({
           timestamp: bootstrap.getTimestamp(),
         });
@@ -71,13 +71,14 @@ describe('storage service', function (this: Mocha.Suite) {
 
         const pinButton = window.getByRole('menuitem', {
           name: 'Pin chat',
+          exact: true,
         });
         await pinButton.click();
 
         const newState = await phone.waitForStorageState({
           after: state,
         });
-        assert.isTrue(await newState.isGroupPinned(group), 'group not pinned');
+        assert.isTrue(newState.isGroupPinned(group), 'group not pinned');
 
         // AccountRecord
         const { added, removed } = newState.diff(state);
@@ -123,6 +124,7 @@ describe('storage service', function (this: Mocha.Suite) {
 
           const pinButton = window.getByRole('menuitem', {
             name: 'Pin chat',
+            exact: true,
           });
           // oxlint-disable-next-line no-await-in-loop
           await pinButton.click();
@@ -141,8 +143,7 @@ describe('storage service', function (this: Mocha.Suite) {
           const newState = await phone.waitForStorageState({
             after: state,
           });
-          // oxlint-disable-next-line no-await-in-loop
-          assert.isTrue(await newState.isPinned(contact), 'contact not pinned');
+          assert.isTrue(newState.isPinned(contact), 'contact not pinned');
 
           // AccountRecord
           const { added, removed } = newState.diff(state);

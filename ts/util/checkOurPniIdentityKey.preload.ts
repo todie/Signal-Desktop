@@ -6,19 +6,30 @@ import { constantTimeEqual } from '../Crypto.node.ts';
 import { signalProtocolStore } from '../SignalProtocolStore.preload.ts';
 import { whoami, getKeysForServiceId } from '../textsecure/WebAPI.preload.ts';
 import { itemStorage } from '../textsecure/Storage.preload.ts';
+import { toTaggedPni } from '../types/ServiceId.std.ts';
 
 const log = createLogger('checkOurPniIdentityKey');
 
 export async function checkOurPniIdentityKey(): Promise<void> {
-  const ourPni = itemStorage.user.getCheckedPni();
+  const ourPni = itemStorage.user.getOptionalPni();
+  if (ourPni == null) {
+    return;
+  }
+
   const { pni: remotePni } = await whoami();
-  if (remotePni !== ourPni) {
+  if (remotePni == null) {
+    log.warn(`remote pni absent, local is ${ourPni}`);
+    window.Whisper.events.emit('unlinkAndDisconnect');
+    return;
+  }
+
+  if (toTaggedPni(remotePni) !== ourPni) {
     log.warn(`remote pni mismatch, ${remotePni} != ${ourPni}`);
     window.Whisper.events.emit('unlinkAndDisconnect');
     return;
   }
 
-  const localKeyPair = await signalProtocolStore.getIdentityKeyPair(ourPni);
+  const localKeyPair = signalProtocolStore.getIdentityKeyPair(ourPni);
   if (!localKeyPair) {
     log.warn(`no local key pair for ${ourPni}, unlinking`);
     window.Whisper.events.emit('unlinkAndDisconnect');

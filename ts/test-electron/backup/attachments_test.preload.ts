@@ -9,7 +9,7 @@ import { assert } from 'chai';
 import type { ConversationModel } from '../../models/conversations.preload.ts';
 import * as Bytes from '../../Bytes.std.ts';
 import { DataWriter } from '../../sql/Client.preload.ts';
-import { type AciString, generateAci } from '../../types/ServiceId.std.ts';
+import type { AciString } from '../../types/ServiceId.std.ts';
 import { ReadStatus } from '../../messages/MessageReadStatus.std.ts';
 import { SeenStatus } from '../../MessageSeenStatus.std.ts';
 import { setupBasics, asymmetricRoundtripHarness } from './helpers.preload.ts';
@@ -31,6 +31,7 @@ import {
 } from '../../util/Attachment.std.ts';
 import type { AttachmentType } from '../../types/Attachment.std.ts';
 import { strictAssert } from '../../util/assert.std.ts';
+import { DurationInSeconds } from '../../util/durations/index.std.ts';
 import { SignalService } from '../../protobuf/index.std.ts';
 import { getRandomBytes } from '../../Crypto.node.ts';
 import { loadAllAndReinitializeRedux } from '../../services/allLoaders.preload.ts';
@@ -41,6 +42,8 @@ import {
 } from '../../AttachmentCrypto.node.ts';
 import { KIBIBYTE } from '../../types/AttachmentSize.std.ts';
 import { itemStorage } from '../../textsecure/Storage.preload.ts';
+import { generateAci } from '../../test-helpers/serviceIdUtils.std.ts';
+import { Emoji } from '../../axo/emoji.std.ts';
 
 const { omit } = lodash;
 
@@ -439,6 +442,8 @@ describe('backup/attachments', () => {
       const attachment = composeAttachment(1);
       attachment.contentType = AUDIO_MP3;
       attachment.flags = SignalService.AttachmentPointer.Flags.VOICE_MESSAGE;
+      attachment.duration = DurationInSeconds.fromSeconds(1.25);
+      attachment.audioWaveform = [1, 2, 3];
 
       strictAssert(isVoiceMessage(attachment), 'it is a voice attachment');
       strictAssert(attachment.digest, 'digest exists');
@@ -830,7 +835,7 @@ describe('backup/attachments', () => {
           [
             composeMessage(1, {
               sticker: {
-                emoji: '🐒',
+                emoji: Emoji.MONKEY,
                 packId,
                 packKey,
                 stickerId: 0,
@@ -847,7 +852,7 @@ describe('backup/attachments', () => {
           [
             composeMessage(1, {
               sticker: {
-                emoji: '🐒',
+                emoji: Emoji.MONKEY,
                 packId,
                 packKey,
                 stickerId: 0,
@@ -894,7 +899,7 @@ describe('backup/attachments', () => {
           [
             composeMessage(1, {
               sticker: {
-                emoji: '🐒',
+                emoji: Emoji.MONKEY,
                 packId,
                 packKey,
                 stickerId: 0,
@@ -911,7 +916,7 @@ describe('backup/attachments', () => {
           [
             composeMessage(1, {
               sticker: {
-                emoji: '🐒',
+                emoji: Emoji.MONKEY,
                 packId,
                 packKey,
                 stickerId: 0,
@@ -939,7 +944,7 @@ describe('backup/attachments', () => {
           [
             composeMessage(1, {
               sticker: {
-                emoji: '🐒',
+                emoji: Emoji.MONKEY,
                 packId,
                 packKey,
                 stickerId: 0,
@@ -950,7 +955,7 @@ describe('backup/attachments', () => {
           [
             composeMessage(1, {
               sticker: {
-                emoji: '🐒',
+                emoji: Emoji.MONKEY,
                 packId,
                 packKey,
                 stickerId: 0,

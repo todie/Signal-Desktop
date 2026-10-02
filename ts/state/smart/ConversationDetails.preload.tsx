@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import lodash from 'lodash';
-import React, { memo, useCallback, useState, useEffect } from 'react';
+import { memo, useCallback, useState, useEffect } from 'react';
 import { useSelector } from 'react-redux';
 import { ConversationDetails } from '../../components/conversation/conversation-details/ConversationDetails.dom.tsx';
 import {
@@ -52,8 +52,8 @@ import { drop } from '../../util/drop.std.ts';
 import { DataReader } from '../../sql/Client.preload.ts';
 import { isFeaturedEnabledSelector } from '../../util/isFeatureEnabled.dom.ts';
 import { getCanAddLabel } from '../../types/GroupMemberLabels.std.ts';
-import { useToastActions } from '../ducks/toast.preload.ts';
 import { useNavActions } from '../ducks/nav.std.ts';
+import { NavTab, SettingsPage } from '../../types/Nav.std.ts';
 
 const { sortBy } = lodash;
 
@@ -133,6 +133,7 @@ export const SmartConversationDetails = memo(function SmartConversationDetails({
     onArchive,
     onMoveToInbox,
     replaceAvatar,
+    reportSpam,
     saveAvatarToDisk,
     setDisappearingMessages,
     setMuteExpiration,
@@ -142,7 +143,7 @@ export const SmartConversationDetails = memo(function SmartConversationDetails({
     updateGroupAttributes,
     updateNicknameAndNote,
   } = useConversationsActions();
-  const { pushPanelForConversation } = useNavActions();
+  const { pushPanelForConversation, changeLocation } = useNavActions();
   const {
     onOutgoingAudioCallInConversation,
     onOutgoingVideoCallInConversation,
@@ -155,7 +156,6 @@ export const SmartConversationDetails = memo(function SmartConversationDetails({
     toggleEditNicknameAndNoteModal,
     toggleSafetyNumberModal,
   } = useGlobalModalActions();
-  const { showToast } = useToastActions();
 
   const conversation = conversationSelector(conversationId);
   assertDev(
@@ -231,6 +231,15 @@ export const SmartConversationDetails = memo(function SmartConversationDetails({
     destroyMessages(conversationId);
   }, [destroyMessages, conversationId]);
 
+  const onNavigateToDonate = useCallback(() => {
+    changeLocation({
+      tab: NavTab.Settings,
+      details: {
+        page: SettingsPage.DonationsDonateFlow,
+      },
+    });
+  }, [changeLocation]);
+
   const [hasMedia, setHasMedia] = useState(false);
 
   useEffect(() => {
@@ -285,6 +294,7 @@ export const SmartConversationDetails = memo(function SmartConversationDetails({
       onConversationDeleteMessages={onConversationDeleteMessages}
       onConversationUnarchive={onConversationUnarchive}
       onDeleteNicknameAndNote={handleDeleteNicknameAndNote}
+      onNavigateToDonate={onNavigateToDonate}
       onOpenEditNicknameAndNoteModal={handleOpenEditNicknameAndNoteModal}
       onOutgoingAudioCallInConversation={onOutgoingAudioCallInConversation}
       onOutgoingVideoCallInConversation={onOutgoingVideoCallInConversation}
@@ -295,6 +305,7 @@ export const SmartConversationDetails = memo(function SmartConversationDetails({
       renderChooseGroupMembersModal={renderChooseGroupMembersModal}
       renderConfirmAdditionsModal={renderConfirmAdditionsModal}
       replaceAvatar={replaceAvatar}
+      reportSpam={reportSpam}
       saveAvatarToDisk={saveAvatarToDisk}
       searchInConversation={searchInConversation}
       selectedNavTab={selectedNavTab}
@@ -302,7 +313,6 @@ export const SmartConversationDetails = memo(function SmartConversationDetails({
       setMuteExpiration={setMuteExpiration}
       showContactModal={showContactModal}
       showConversation={showConversation}
-      showToast={showToast}
       startAvatarDownload={() => startAvatarDownload(conversationId)}
       terminateGroup={terminateGroup}
       theme={theme}

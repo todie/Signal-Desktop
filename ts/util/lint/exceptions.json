@@ -1,21 +1,5 @@
 [
   {
-    "rule": "eval",
-    "path": "components/mp3lameencoder/lib/Mp3LameEncoder.js",
-    "line": "    return eval(funcstr);",
-    "reasonCategory": "usageTrusted",
-    "updated": "2018-09-18T19:19:27.699Z",
-    "reasonDetail": "Part of a set of functions to implement C calls"
-  },
-  {
-    "rule": "eval",
-    "path": "components/mp3lameencoder/lib/Mp3LameEncoder.js",
-    "line": "      func = eval('_' + ident); // explicit lookup",
-    "reasonCategory": "usageTrusted",
-    "updated": "2018-09-18T19:19:27.699Z",
-    "reasonDetail": "Part of runtime library for C++ transpiled code"
-  },
-  {
     "rule": "DOM-innerHTML",
     "path": "node_modules/@signalapp/quill-cjs/core/editor.js",
     "line": "      innerHTML",
@@ -189,60 +173,6 @@
   },
   {
     "rule": "DOM-innerHTML",
-    "path": "node_modules/axe-core/axe.js",
-    "line": "      style.innerHTML = usePointer ? '* { pointer-events: all }' : '* { visibility: visible }';",
-    "reasonCategory": "usageTrusted",
-    "updated": "2021-04-13T00:52:21.453Z"
-  },
-  {
-    "rule": "DOM-outerHTML",
-    "path": "node_modules/axe-core/axe.js",
-    "line": "      var source = element.outerHTML;",
-    "reasonCategory": "usageTrusted",
-    "updated": "2021-04-13T00:52:21.453Z"
-  },
-  {
-    "rule": "DOM-outerHTML",
-    "path": "node_modules/axe-core/axe.js",
-    "line": "      if (!(element !== null && element !== void 0 && element.outerHTML)) {",
-    "reasonCategory": "usageTrusted",
-    "updated": "2024-11-13T23:33:49.776Z"
-  },
-  {
-    "rule": "DOM-outerHTML",
-    "path": "node_modules/axe-core/axe.js",
-    "line": "        var outerHTML = node.outerHTML;",
-    "reasonCategory": "usageTrusted",
-    "updated": "2024-11-13T23:33:49.776Z"
-  },
-  {
-    "rule": "DOM-outerHTML",
-    "path": "node_modules/axe-core/axe.js",
-    "line": "        node = cache_default.get(outerHTML, function() {",
-    "reasonCategory": "usageTrusted",
-    "updated": "2024-11-13T23:33:49.776Z"
-  },
-  {
-    "rule": "DOM-innerHTML",
-    "path": "node_modules/axe-core/axe.min.js",
-    "reasonCategory": "usageTrusted",
-    "updated": "2021-04-13T17:31:15.352Z"
-  },
-  {
-    "rule": "DOM-outerHTML",
-    "path": "node_modules/axe-core/axe.min.js",
-    "reasonCategory": "usageTrusted",
-    "updated": "2021-04-13T17:31:15.352Z"
-  },
-  {
-    "rule": "eval",
-    "path": "node_modules/config/parser.js",
-    "line": "      return VisionmediaYaml.eval(Parser.stripYamlComments(content));",
-    "reasonCategory": "usageTrusted",
-    "updated": "2024-11-14T01:39:46.132Z"
-  },
-  {
-    "rule": "DOM-innerHTML",
     "path": "node_modules/google-libphonenumber/dist/libphonenumber.js",
     "reasonCategory": "notExercisedByOurApp",
     "updated": "2021-02-16T19:08:17.452Z",
@@ -285,116 +215,6 @@
     "reasonDetail": "Hard-coded string used for testing capabilities."
   },
   {
-    "rule": "DOM-innerHTML",
-    "path": "node_modules/intl-tel-input/build/js/intlTelInput.js",
-    "line": "                        this.selectedDialCode.innerHTML = dialCode;",
-    "reasonCategory": "usageTrusted",
-    "updated": "2021-12-01T01:31:12.757Z"
-  },
-  {
-    "rule": "DOM-innerHTML",
-    "path": "node_modules/intl-tel-input/build/js/intlTelInput.js",
-    "line": "      this.countryList.innerHTML = \"\";",
-    "reasonCategory": "usageTrusted",
-    "updated": "2024-11-16T00:33:41.092Z"
-  },
-  {
-    "rule": "DOM-innerHTML",
-    "path": "node_modules/intl-tel-input/build/js/intlTelInput.min.js",
-    "reasonCategory": "usageTrusted",
-    "updated": "2021-12-01T01:31:12.757Z"
-  },
-  {
-    "rule": "DOM-innerHTML",
-    "path": "node_modules/intl-tel-input/build/js/intlTelInputWithUtils.js",
-    "line": "      this.countryList.innerHTML = \"\";",
-    "reasonCategory": "usageTrusted",
-    "updated": "2024-11-16T00:33:41.092Z"
-  },
-  {
-    "rule": "DOM-innerHTML",
-    "path": "node_modules/intl-tel-input/build/js/intlTelInputWithUtils.js",
-    "line": "        this.selectedDialCode.innerHTML = dialCode;",
-    "reasonCategory": "usageTrusted",
-    "updated": "2024-11-16T00:33:41.092Z"
-  },
-  {
-    "rule": "DOM-innerHTML",
-    "path": "node_modules/intl-tel-input/build/js/intlTelInputWithUtils.min.js",
-    "reasonCategory": "usageTrusted",
-    "updated": "2024-11-16T00:33:41.092Z"
-  },
-  {
-    "rule": "DOM-innerHTML",
-    "path": "node_modules/intl-tel-input/react/build/IntlTelInput.js",
-    "line": "    this.countryList.innerHTML = \"\";",
-    "reasonCategory": "usageTrusted",
-    "updated": "2024-11-16T00:33:41.092Z"
-  },
-  {
-    "rule": "DOM-innerHTML",
-    "path": "node_modules/intl-tel-input/react/build/IntlTelInput.js",
-    "line": "      this.selectedDialCode.innerHTML = dialCode;",
-    "reasonCategory": "usageTrusted",
-    "updated": "2024-11-16T00:33:41.092Z"
-  },
-  {
-    "rule": "React-useRef",
-    "path": "node_modules/intl-tel-input/react/build/IntlTelInput.js",
-    "line": "  const inputRef = useRef(null);",
-    "reasonCategory": "usageTrusted",
-    "updated": "2024-11-16T00:33:41.092Z"
-  },
-  {
-    "rule": "React-useRef",
-    "path": "node_modules/intl-tel-input/react/build/IntlTelInput.js",
-    "line": "  const itiRef = useRef(null);",
-    "reasonCategory": "usageTrusted",
-    "updated": "2024-11-16T00:33:41.092Z"
-  },
-  {
-    "rule": "DOM-innerHTML",
-    "path": "node_modules/intl-tel-input/react/build/IntlTelInputWithUtils.js",
-    "line": "    this.countryList.innerHTML = \"\";",
-    "reasonCategory": "usageTrusted",
-    "updated": "2024-11-16T00:33:41.092Z"
-  },
-  {
-    "rule": "DOM-innerHTML",
-    "path": "node_modules/intl-tel-input/react/build/IntlTelInputWithUtils.js",
-    "line": "      this.selectedDialCode.innerHTML = dialCode;",
-    "reasonCategory": "usageTrusted",
-    "updated": "2024-11-16T00:33:41.092Z"
-  },
-  {
-    "rule": "React-useRef",
-    "path": "node_modules/intl-tel-input/react/build/IntlTelInputWithUtils.js",
-    "line": "  const inputRef = useRef(null);",
-    "reasonCategory": "usageTrusted",
-    "updated": "2024-11-16T00:33:41.092Z"
-  },
-  {
-    "rule": "React-useRef",
-    "path": "node_modules/intl-tel-input/react/build/IntlTelInputWithUtils.js",
-    "line": "  const itiRef = useRef(null);",
-    "reasonCategory": "usageTrusted",
-    "updated": "2024-11-16T00:33:41.092Z"
-  },
-  {
-    "rule": "thenify-multiArgs",
-    "path": "node_modules/pify/index.js",
-    "line": "\t\t\t\tif (opts.multiArgs) {",
-    "reasonCategory": "falseMatch",
-    "updated": "2018-09-19T18:06:35.446Z"
-  },
-  {
-    "rule": "thenify-multiArgs",
-    "path": "node_modules/pify/index.js",
-    "line": "\t\t\t\tif (opts.multiArgs) {",
-    "reasonCategory": "falseMatch",
-    "updated": "2018-09-19T18:06:35.446Z"
-  },
-  {
     "rule": "eval",
     "path": "node_modules/pino/test/fixtures/eval/index.js",
     "line": "eval(`",
@@ -402,22 +222,6 @@
     "updated": "2024-06-24T19:19:28.335Z"
   },
   {
-    "rule": "DOM-document.write(",
-    "path": "node_modules/qrcode-generator/sample.js",
-    "line": "  document.write(create_qrcode(text, typeNumber, errorCorrectionLevel) );",
-    "reasonCategory": "notExercisedByOurApp",
-    "updated": "2022-01-04T20:32:10.596Z",
-    "reasonDetail": "Sample code never required by us."
-  },
-  {
-    "rule": "DOM-innerHTML",
-    "path": "node_modules/qrcode-generator/sample.js",
-    "line": "  document.getElementById('qr').innerHTML =",
-    "reasonCategory": "notExercisedByOurApp",
-    "updated": "2022-01-04T20:32:10.596Z",
-    "reasonDetail": "Sample code never required by us."
-  },
-  {
     "rule": "DOM-innerHTML",
     "path": "node_modules/react-blurhash/docs/demo.f335462148ad584661d8.js",
     "reasonCategory": "usageTrusted",
@@ -458,5 +262,61 @@
     "path": "node_modules/react-blurhash/docs/demo.f335462148ad584661d8.js",
     "reasonCategory": "usageTrusted",
     "updated": "2024-11-14T18:53:33.345Z"
+  },
+  {
+    "rule": "React-useRef",
+    "path": "node_modules/react-intl/react-intl.iife.js",
+    "line": "    const cacheRef = React8.useRef(createIntlCache());",
+    "reasonCategory": "usageTrusted",
+    "updated": "2026-04-03T05:59:27.141Z"
+  },
+  {
+    "rule": "React-useRef",
+    "path": "node_modules/react-intl/react-intl.iife.js",
+    "line": "    const prevConfigRef = React8.useRef(void 0);",
+    "reasonCategory": "usageTrusted",
+    "updated": "2026-04-03T05:59:27.141Z"
+  },
+  {
+    "rule": "React-useRef",
+    "path": "node_modules/react-intl/react-intl.iife.js",
+    "line": "    const intlRef = React8.useRef(void 0);",
+    "reasonCategory": "usageTrusted",
+    "updated": "2026-04-03T05:59:27.141Z"
+  },
+  {
+    "rule": "React-useRef",
+    "path": "node_modules/react-intl/react-intl.iife.js",
+    "line": "    const updateTimer = React9.useRef(void 0);",
+    "reasonCategory": "usageTrusted",
+    "updated": "2026-04-03T05:59:27.141Z"
+  },
+  {
+    "rule": "React-useRef",
+    "path": "node_modules/react-intl/src/components/provider.js",
+    "line": "\tconst cacheRef = React.useRef(createIntlCache());",
+    "reasonCategory": "usageTrusted",
+    "updated": "2026-04-03T05:59:27.141Z"
+  },
+  {
+    "rule": "React-useRef",
+    "path": "node_modules/react-intl/src/components/provider.js",
+    "line": "\tconst prevConfigRef = React.useRef(undefined);",
+    "reasonCategory": "usageTrusted",
+    "updated": "2026-04-03T05:59:27.141Z"
+  },
+  {
+    "rule": "React-useRef",
+    "path": "node_modules/react-intl/src/components/provider.js",
+    "line": "\tconst intlRef = React.useRef(undefined);",
+    "reasonCategory": "usageTrusted",
+    "updated": "2026-04-03T05:59:27.141Z"
+  },
+  {
+    "rule": "React-useRef",
+    "path": "node_modules/react-intl/src/components/relative.js",
+    "line": "\tconst updateTimer = React.useRef(undefined);",
+    "reasonCategory": "usageTrusted",
+    "updated": "2026-04-03T05:59:27.141Z"
   }
 ]

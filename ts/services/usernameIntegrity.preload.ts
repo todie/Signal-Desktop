@@ -27,7 +27,7 @@ const STORAGE_SERVICE_TIMEOUT = 30 * MINUTE;
 
 class UsernameIntegrityService {
   #isStarted = false;
-  #scheduler = new CheckScheduler({
+  readonly #scheduler = new CheckScheduler({
     name: 'UsernameIntegrityService',
     interval: DAY,
     storageKey: 'usernameLastIntegrityCheck',
@@ -127,7 +127,7 @@ class UsernameIntegrityService {
 
     window.Whisper.events.once('storageService:syncComplete', () => resolve());
 
-    await pTimeout(once, STORAGE_SERVICE_TIMEOUT);
+    await pTimeout(once, { milliseconds: STORAGE_SERVICE_TIMEOUT });
 
     const me = window.ConversationController.getOurConversationOrThrow();
 

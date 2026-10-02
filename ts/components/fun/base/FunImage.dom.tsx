@@ -1,7 +1,7 @@
 // Copyright 2025 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
-import type { ForwardedRef, RefObject } from 'react';
-import React, { useRef, useEffect, useState, forwardRef } from 'react';
+import type { ForwardedRef, RefObject, JSX } from 'react';
+import { useRef, useEffect, useState, forwardRef } from 'react';
 import classNames from 'classnames';
 import { isFocusable } from '@react-aria/focus';
 import { strictAssert } from '../../../util/assert.std.ts';
@@ -17,7 +17,7 @@ export type FunImageProps = FunImageAriaProps &
     ignoreReducedMotion?: boolean;
   }>;
 
-export function FunImage(props: FunImageProps): React.JSX.Element {
+export function FunImage(props: FunImageProps): JSX.Element {
   if (props.ignoreReducedMotion) {
     return <FunImageBase {...props} />;
   }
@@ -35,6 +35,7 @@ const FunImageBase = forwardRef(function FunImageBase(
       role={props.role}
       aria-label={props['aria-label']}
       className={props.className}
+      crossOrigin="anonymous"
       src={props.src}
       width={props.width}
       height={props.height}
@@ -74,7 +75,11 @@ function FunImageReducedMotion(props: FunImageProps) {
       controller.abort();
       image.removeEventListener('load', onLoad);
     };
-  }, [props.src, reducedMotion]);
+  }, [
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies
+    props.src,
+    reducedMotion,
+  ]);
 
   // Ensure we always revoke the object URL.
   useEffect(() => {

@@ -16,6 +16,7 @@ import {
 import type { LoggerType } from '../types/Logging.std.ts';
 import { scaleImageToLevel } from '../util/scaleImageToLevel.preload.ts';
 import { createLogger } from '../logging/log.std.ts';
+import { shouldPreviewHref } from '../types/LinkPreview.std.ts';
 
 const log = createLogger('linkPreviewFetch');
 
@@ -44,7 +45,7 @@ const MIN_HTML_CONTENT_LENGTH = 8;
 // Similar to the above. We don't want to show tiny images (even though the more likely
 //   case is that the Content-Length is 0).
 const MIN_IMAGE_CONTENT_LENGTH = 8;
-const VALID_IMAGE_MIME_TYPES: Set<MIMEType> = new Set([
+const VALID_IMAGE_MIME_TYPES = new Set<MIMEType>([
   IMAGE_GIF,
   IMAGE_ICO,
   IMAGE_JPEG,
@@ -114,9 +115,9 @@ async function fetchWithRedirects(
     }
 
     const newUrl = maybeParseUrl(location, nextHrefToLoad);
-    if (newUrl?.protocol !== 'https:') {
+    if (!newUrl || !shouldPreviewHref(newUrl.href)) {
       logger.warn(
-        'fetchWithRedirects: got a redirect status code and an invalid Location header'
+        'fetchWithRedirects: got a redirect status code and an invalid or disallowed Location header'
       );
       throw new Error('invalid location');
     }
@@ -614,7 +615,7 @@ async function processImageResponse(
 
   let data: Uint8Array<ArrayBuffer>;
   try {
-    data = await response.buffer();
+    data = new Uint8Array(await response.arrayBuffer());
   } catch (err) {
     logger.warn('fetchLinkPreviewImage: failed to read body; bailing');
     return null;

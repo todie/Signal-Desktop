@@ -170,6 +170,7 @@ export async function send(
   errors.forEach(error => {
     const errorConversation =
       window.ConversationController.get(error.serviceId) ||
+      window.ConversationController.get(error.identifier) ||
       window.ConversationController.get(error.number);
 
     if (errorConversation && !saveErrors && sendIsFinal) {
@@ -192,8 +193,8 @@ export async function send(
     let shouldSaveError = true;
     switch (error.name) {
       case 'OutgoingIdentityKeyError': {
-        if (conversation) {
-          promises.push(conversation.getProfiles());
+        if (errorConversation) {
+          promises.push(errorConversation.getProfiles());
         }
         break;
       }
@@ -209,7 +210,7 @@ export async function send(
         // The way to discover registration once more is:
         //   1) any attempt to send to them in 1:1 conversation
         //   2) the six-hour time period has passed and we send in a group again
-        conversation?.setUnregistered();
+        errorConversation?.setUnregistered();
         break;
       default:
         break;
@@ -324,7 +325,7 @@ export async function sendSyncMessageOnly(
   }
 }
 
-export async function sendSyncMessage(
+async function sendSyncMessage(
   message: MessageModel,
   targetTimestamp: number
 ): Promise<CallbackResultType | void> {
@@ -334,16 +335,16 @@ export async function sendSyncMessage(
     syncMessage: true,
   });
 
-  if (window.ConversationController.areWePrimaryDevice()) {
+  if (!window.ConversationController.doWeHaveOtherDevices()) {
     log.warn(
-      'sendSyncMessage: We are primary device; not sending sync message'
+      'sendSyncMessage: We have no other devices; not sending sync message'
     );
     message.set({ dataMessage: undefined });
     return;
   }
 
   // oxlint-disable-next-line no-param-reassign
-  message.syncPromise = message.syncPromise || Promise.resolve();
+  message.syncPromise ??= Promise.resolve();
   const next = async () => {
     const dataMessage = message.get('dataMessage');
     if (!dataMessage) {

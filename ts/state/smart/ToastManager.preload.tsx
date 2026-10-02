@@ -1,11 +1,16 @@
 // Copyright 2024 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import React, { memo } from 'react';
+import { memo, type JSX } from 'react';
 import { useSelector } from 'react-redux';
+import { getHeapSnapshot } from 'node:v8';
+
 import type { AnyActionableMegaphone } from '../../types/Megaphone.std.ts';
 import { MegaphoneType } from '../../types/Megaphone.std.ts';
-import { UsernameOnboardingState } from '../../types/globalModals.std.ts';
+import {
+  PinReminderState,
+  UsernameOnboardingState,
+} from '../../types/globalModals.std.ts';
 import OS from '../../util/os/osMain.node.ts';
 import { drop } from '../../util/drop.std.ts';
 import { getIntl } from '../selectors/user.std.ts';
@@ -15,7 +20,6 @@ import {
 } from '../selectors/globalModals.std.ts';
 import { hasSelectedStoryData } from '../selectors/stories.preload.ts';
 import { shouldShowLightbox } from '../selectors/lightbox.std.ts';
-import { isInFullScreenCall as getIsInFullScreenCall } from '../selectors/calling.std.ts';
 import {
   getSelectedConversationId,
   getSelectedNavTab,
@@ -36,6 +40,10 @@ import { itemStorage } from '../../textsecure/Storage.preload.ts';
 import { getVisibleMegaphonesForDisplay } from '../selectors/megaphones.preload.ts';
 import { useMegaphonesActions } from '../ducks/megaphones.preload.ts';
 import { shouldNeverBeCalled } from '../../util/shouldNeverBeCalled.std.ts';
+import { saveAttachmentToDisk } from '../../windows/main/attachments.preload.ts';
+import * as Bytes from '../../Bytes.std.ts';
+import { getIsInFullScreenCall } from '../selectors/isInFullScreenCall.std.ts';
+import { pinReminderService } from '../../services/pinReminder.preload.ts';
 
 export type SmartPropsType = Readonly<{
   disableMegaphone?: boolean;
@@ -47,9 +55,24 @@ function handleShowDebugLog() {
   window.IPC.showDebugLog();
 }
 
+async function saveHeapSnapshot() {
+  const stream = getHeapSnapshot();
+
+  const chunks = new Array<Uint8Array<ArrayBuffer>>();
+  for await (const chunk of stream) {
+    chunks.push(chunk);
+  }
+  const data = Bytes.concatenate(chunks);
+
+  await saveAttachmentToDisk({
+    data,
+    name: `signal-desktop-${Date.now()}.heapsnapshot`,
+  });
+}
+
 export function renderToastManagerWithoutMegaphone(props: {
   containerWidthBreakpoint: WidthBreakpoint;
-}): React.JSX.Element {
+}): JSX.Element {
   return (
     <SmartToastManager
       disableMegaphone
@@ -85,7 +108,8 @@ export const SmartToastManager = memo(function SmartToastManager({
   const { onUndoArchive } = useConversationsActions();
   const { retryCallQualitySurvey } = useCallingActions();
   const { openFileInFolder, hideToast } = useToastActions();
-  const { toggleUsernameOnboarding } = useGlobalModalActions();
+  const { togglePinReminder, toggleUsernameOnboarding } =
+    useGlobalModalActions();
   const { interactWithMegaphone } = useMegaphonesActions();
 
   let megaphone: AnyActionableMegaphone | undefined;
@@ -109,6 +133,16 @@ export const SmartToastManager = memo(function SmartToastManager({
       type: MegaphoneType.Remote,
       onInteractWithMegaphone: interactWithMegaphone,
     };
+  } else if (globalModals.pinReminderState === PinReminderState.Megaphone) {
+    megaphone = {
+      type: MegaphoneType.PinReminder,
+      onShowModal: () => {
+        togglePinReminder(PinReminderState.Modal);
+      },
+      onDismiss: () => {
+        pinReminderService.handleSkipReminder();
+      },
+    };
   }
 
   const centerToast =
@@ -131,6 +165,7 @@ export const SmartToastManager = memo(function SmartToastManager({
       onUndoArchive={onUndoArchive}
       retryCallQualitySurvey={retryCallQualitySurvey}
       openFileInFolder={openFileInFolder}
+      saveHeapSnapshot={saveHeapSnapshot}
       hideToast={hideToast}
       setDidResumeDonation={setDidResume}
       centerToast={centerToast}

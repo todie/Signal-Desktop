@@ -13,14 +13,14 @@ import type {
   OuterSignedPrekeyType,
   PreKeyType,
 } from '../../textsecure/Types.d.ts';
-import {
-  ServiceIdKind,
-  generateAci,
-  generatePni,
-} from '../../types/ServiceId.std.ts';
+import { ServiceIdKind } from '../../types/ServiceId.std.ts';
 import { DAY } from '../../util/durations/index.std.ts';
 import { signalProtocolStore } from '../../SignalProtocolStore.preload.ts';
 import { itemStorage } from '../../textsecure/Storage.preload.ts';
+import {
+  generateAci,
+  generatePni,
+} from '../../test-helpers/serviceIdUtils.std.ts';
 
 const { range } = lodash;
 
@@ -46,10 +46,9 @@ describe('AccountManager', () => {
       .resolves(ourRegistrationId);
     const { user } = itemStorage;
     sandbox.stub(user, 'getAci').returns(ourAci);
-    sandbox.stub(user, 'getPni').returns(ourPni);
+    sandbox.stub(user, 'getOptionalPni').returns(ourPni);
     sandbox.stub(user, 'getServiceId').returns(ourAci);
     sandbox.stub(user, 'getCheckedAci').returns(ourAci);
-    sandbox.stub(user, 'getCheckedPni').returns(ourPni);
     sandbox.stub(user, 'getCheckedServiceId').returns(ourAci);
   });
 

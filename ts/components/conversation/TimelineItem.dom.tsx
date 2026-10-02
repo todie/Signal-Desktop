@@ -1,13 +1,12 @@
 // Copyright 2019 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import type { ReactNode, RefObject } from 'react';
-import React, { memo } from 'react';
+import type { ReactNode, RefObject, JSX } from 'react';
+import { memo } from 'react';
 
 import type { LocalizerType, ThemeType } from '../../types/Util.std.ts';
 import type { GetSharedGroupNamesType } from '../../util/sharedGroupNames.dom.ts';
 
-import type { InteractionModeType } from '../../state/ducks/conversations.preload.ts';
 import { TimelineDateHeader } from './TimelineDateHeader.dom.tsx';
 import type {
   Props as AllMessageProps,
@@ -75,6 +74,7 @@ import type { RenderItemProps } from '../../state/smart/TimelineItem.preload.tsx
 import type { CollapseSet } from '../../util/CollapseSet.std.ts';
 import { CollapseSetViewer } from './CollapseSet.dom.tsx';
 import type { TargetedMessageType } from '../../state/selectors/conversations.dom.ts';
+import type { TargetedMessageSource } from '../../state/ducks/conversationsEnums.std.ts';
 
 type CallHistoryType = {
   type: 'callHistory';
@@ -217,6 +217,7 @@ type PropsLocalType = {
   isNextItemCallingNotification: boolean;
   isSelectMode: boolean;
   isSelected: boolean;
+  isSignalConversation: boolean;
   isTargeted: boolean;
   scrollToPinnedMessage: (pinMessage: PinMessageData) => void;
   scrollToPollMessage: (
@@ -224,7 +225,11 @@ type PropsLocalType = {
     pollTimestamp: number,
     conversationId: string
   ) => unknown;
-  targetMessage: (messageId: string, conversationId: string) => unknown;
+  targetMessage: (
+    messageId: string,
+    conversationId: string,
+    targetedMessageSource: TargetedMessageSource
+  ) => void;
   toggleSelectMessage: (
     conversationId: string,
     messageId: string,
@@ -235,12 +240,11 @@ type PropsLocalType = {
   onOpenEditNicknameAndNoteModal: (contactId: string) => void;
   onOpenMessageRequestActionsConfirmation: (state: MessageRequestState) => void;
   platform: string;
-  renderContact: SmartContactRendererType<React.JSX.Element>;
-  renderUniversalTimerNotification: () => React.JSX.Element;
-  renderItem: (props: RenderItemProps) => React.JSX.Element;
+  renderContact: SmartContactRendererType<JSX.Element>;
+  renderUniversalTimerNotification: () => JSX.Element;
+  renderItem: (props: RenderItemProps) => JSX.Element;
   i18n: LocalizerType;
-  interactionMode: InteractionModeType;
-  targetedMessage: TargetedMessageType | undefined;
+  targetedMessage: TargetedMessageType | null;
   theme: ThemeType;
 };
 
@@ -275,6 +279,7 @@ export const TimelineItem = memo(function TimelineItem({
   isNextItemCallingNotification,
   isSelectMode,
   isSelected,
+  isSignalConversation,
   isTargeted,
   item,
   onOpenEditNicknameAndNoteModal,
@@ -284,6 +289,7 @@ export const TimelineItem = memo(function TimelineItem({
   platform,
   renderUniversalTimerNotification,
   returnToActiveCall,
+  renderContact,
   renderItem,
   scrollToPinnedMessage,
   scrollToPollMessage,
@@ -297,7 +303,7 @@ export const TimelineItem = memo(function TimelineItem({
   theme,
   toggleSelectMessage,
   ...reducedProps
-}: PropsType): React.JSX.Element | null {
+}: PropsType): JSX.Element | null {
   if (!item) {
     // This can happen under normal conditions.
     //
@@ -439,7 +445,12 @@ export const TimelineItem = memo(function TimelineItem({
       );
     } else if (item.type === 'groupV2Change') {
       notification = (
-        <GroupV2Change {...reducedProps} {...item.data} i18n={i18n} />
+        <GroupV2Change
+          {...reducedProps}
+          {...item.data}
+          i18n={i18n}
+          renderContact={renderContact}
+        />
       );
     } else if (item.type === 'groupV1Migration') {
       notification = (
@@ -514,6 +525,7 @@ export const TimelineItem = memo(function TimelineItem({
           onOpenMessageRequestActionsConfirmation={
             onOpenMessageRequestActionsConfirmation
           }
+          renderedContact={isGroup ? null : renderContact(conversationId)}
         />
       );
     } else {
@@ -543,7 +555,11 @@ export const TimelineItem = memo(function TimelineItem({
   if (shouldRenderDateHeader) {
     return (
       <>
-        <TimelineDateHeader i18n={i18n} timestamp={item.timestamp} />
+        <TimelineDateHeader
+          i18n={i18n}
+          timestamp={item.timestamp}
+          isSignalConversation={isSignalConversation}
+        />
         {itemContents}
       </>
     );
