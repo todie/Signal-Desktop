@@ -5,7 +5,7 @@ import type { ThunkAction } from 'redux-thunk';
 import lodash from 'lodash';
 import { type PhoneNumber } from 'google-libphonenumber';
 
-import { clipboard, ipcRenderer } from 'electron';
+import { ipcRenderer } from 'electron';
 import type { ReadonlyDeep, SetOptional } from 'type-fest';
 import { DataReader, DataWriter } from '../../sql/Client.preload.ts';
 import type { AttachmentType } from '../../types/Attachment.std.ts';
@@ -46,9 +46,10 @@ import {
   TOGGLE_DISCARD_DRAFT_DIALOG,
 } from './globalModals.preload.ts';
 import {
-  MODIFY_LIST,
   DELETE_LIST,
   HIDE_MY_STORIES_FROM,
+  MARK_AS_DELETED,
+  MODIFY_LIST,
   VIEWERS_CHANGED,
 } from './storyDistributionLists.preload.ts';
 import type { StoryDistributionListsActionType } from './storyDistributionLists.preload.ts';
@@ -90,6 +91,7 @@ import {
   getGroupSizeHardLimit,
 } from '../../groups/limits.dom.ts';
 import { isMessageUnread } from '../../util/isMessageUnread.std.ts';
+import type { NotifyWhileMutedKey } from '../../util/notifyWhileMuted.std.ts';
 import { toggleSelectedContactForGroupAddition } from '../../groups/toggleSelectedContactForGroupAddition.std.ts';
 import type { GroupNameCollisionsWithIdsByTitle } from '../../util/groupMemberNameCollisions.std.ts';
 import { writeProfile } from '../../services/writeProfile.preload.ts';
@@ -121,7 +123,7 @@ import { markViewed as messageUpdaterMarkViewed } from '../../services/MessageUp
 import type { BoundActionCreatorsMapObject } from '../../hooks/useBoundActions.std.ts';
 import { useBoundActions } from '../../hooks/useBoundActions.std.ts';
 
-import type { NoopActionType } from './noop.std.ts';
+import { noopAction, type NoopActionType } from './noop.std.ts';
 import {
   conversationJobQueue,
   conversationQueueJobEnum,
@@ -196,7 +198,7 @@ import {
   SettingsPage,
 } from '../../types/Nav.std.ts';
 import { sortByMessageOrder } from '../../types/ForwardDraft.std.ts';
-import { getAddedByForOurPendingInvitation } from '../../util/getAddedByForOurPendingInvitation.preload.ts';
+import { getAddedByForGroup } from '../../util/getAddedByForGroup.preload.ts';
 import {
   getConversationIdForLogging,
   getMessageIdForLogging,
@@ -245,7 +247,7 @@ import type {
   PinnedMessage,
   PinnedMessagePreloadData,
 } from '../../types/PinnedMessage.std.ts';
-import type { StateThunk } from '../types.std.ts';
+import type { ActionCreator, StateThunk } from '../types.std.ts';
 import { getPinnedMessagesLimit } from '../../util/pinnedMessages.dom.ts';
 import { getPinnedMessageExpiresAt } from '../../util/pinnedMessages.std.ts';
 import { pinnedMessagesCleanupService } from '../../services/expiring/pinnedMessagesCleanupService.preload.ts';
@@ -255,6 +257,18 @@ import {
   getPanels,
   getSelectedConversationId,
 } from '../selectors/nav.std.ts';
+import {
+  computeGroupNameHash,
+  getPinnedConversationLimit,
+} from '../../util/Conversation.preload.ts';
+import type { Emoji } from '../../axo/emoji.std.ts';
+import { isSignalConversation } from '../../util/isSignalConversation.dom.ts';
+import {
+  type DurationSecs,
+  MuteExpiration,
+  SentTimestampMs,
+  TimestampMs,
+} from '@signalapp/types';
 
 const { chunk, difference, fromPairs, omit, orderBy, pick, values, without } =
   lodash;
@@ -270,20 +284,11 @@ export type DBConversationType = ReadonlyDeep<{
   type: string;
 }>;
 
-export const InteractionModes = ['mouse', 'keyboard'] as const;
-export type InteractionModeType = ReadonlyDeep<
-  (typeof InteractionModes)[number]
->;
-
 export type MessageTimestamps = ReadonlyDeep<
   Pick<ReadonlyMessageAttributesType, 'sent_at' | 'received_at'>
 >;
 
-export type MessageType = ReadonlyDeep<
-  ReadonlyMessageAttributesType & {
-    interactionType?: InteractionModeType;
-  }
->;
+export type MessageType = ReadonlyDeep<ReadonlyMessageAttributesType>;
 export type MessageWithUIFieldsType = ReadonlyDeep<
   ReadonlyMessageAttributesType & {
     displayLimit?: number;
@@ -314,7 +319,7 @@ export type LastMessageType = ReadonlyDeep<
 >;
 export type DraftPreviewType = ReadonlyDeep<{
   text: string;
-  prefix?: string;
+  prefix?: Emoji.Variant;
   bodyRanges?: HydratedBodyRangesType;
 }>;
 
@@ -325,7 +330,7 @@ export type ConversationRemovalStage = ReadonlyDeep<
 export type MembershipType = ReadonlyDeep<{
   aci: AciString;
   isAdmin: boolean;
-  labelEmoji: string | undefined;
+  labelEmoji: Emoji.Variant | undefined;
   labelString: string | undefined;
 }>;
 
@@ -350,7 +355,7 @@ export type ConversationType = ReadonlyDeep<
     username?: string;
     about?: string;
     aboutText?: string;
-    aboutEmoji?: string;
+    aboutEmoji?: Emoji.Variant;
     avatars?: ReadonlyArray<AvatarDataType>;
     avatarUrl?: string;
     rawAvatarPath?: string;
@@ -407,8 +412,11 @@ export type ConversationType = ReadonlyDeep<
       aci: AciString;
     }>;
     bannedMemberships?: ReadonlyArray<ServiceIdString>;
-    muteExpiresAt?: number;
-    dontNotifyForMentionsIfMuted?: boolean;
+    muteExpiresAt?: MuteExpiration;
+    notifyForCallsIfMuted?: boolean;
+    notifyForMentionsIfMuted?: boolean;
+    notifyForRepliesIfMuted?: boolean;
+    showUnreadReminders?: boolean;
     isMe: boolean;
     lastUpdated?: number;
     // This is used by the CompositionInput for @mentions
@@ -442,6 +450,7 @@ export type ConversationType = ReadonlyDeep<
     groupVersion?: 1 | 2;
     groupId?: string;
     groupLink?: string;
+    groupVerifiedNameHash?: string;
     terminated?: boolean;
     acceptedMessageRequest: boolean;
     secretParams?: string;
@@ -527,6 +536,7 @@ export type ConversationPreloadDataType = ReadonlyDeep<{
 export type MessagesResetDataType = ReadonlyDeep<
   ConversationPreloadDataType & {
     scrollToMessageId?: string;
+    shouldHighlight?: boolean;
     selectedConversationId: string | undefined;
   }
 >;
@@ -625,9 +635,9 @@ export type ConversationsStateType = ReadonlyDeep<{
   conversationsByGroupId: ConversationLookupType;
   conversationsByUsername: ConversationLookupType;
 
-  targetedMessage: string | undefined;
+  targetedMessage: string | null;
   targetedMessageCounter: number;
-  targetedMessageSource: TargetedMessageSource | undefined;
+  targetedMessageSource: TargetedMessageSource | null;
 
   lastSelectedMessage: MessageTimestamps | undefined;
   selectedMessageIds: ReadonlyArray<string> | undefined;
@@ -822,6 +832,7 @@ export type MessageTargetedActionType = ReadonlyDeep<{
   type: 'MESSAGE_TARGETED';
   payload: {
     messageId: string;
+    targetedMessageSource: TargetedMessageSource;
   };
 }>;
 export type ToggleSelectMessagesActionType = ReadonlyDeep<{
@@ -1217,6 +1228,7 @@ export const actions = {
   repairOldestMessage,
   replaceAvatar,
   resetAllChatColors,
+  resetAllNotificationSettings,
   copyMessageText,
   retryDeleteForEveryone,
   retryMessageSend,
@@ -1245,12 +1257,13 @@ export const actions = {
   setComposeSearchTerm,
   setComposeSelectedRegion,
   setDisappearingMessages,
-  setDontNotifyForMentionsIfMuted,
   setIsFetchingUUID,
   setIsNearBottom,
   setMessageLoadingState,
   setMessageToEdit,
   setMuteExpiration,
+  setNotifyWhileMuted,
+  setShowUnreadReminders,
   setChatFolderMuteExpiration,
   setPinned,
   setPreJoinConversation,
@@ -1389,10 +1402,7 @@ function acknowledgeGroupMemberNameCollisions(
 
   conversation.acknowledgeGroupMemberNameCollisions(groupNameCollisions);
 
-  return {
-    type: 'NOOP',
-    payload: null,
-  };
+  return noopAction('acknowledgeGroupMemberNameCollisions');
 }
 function blockGroupLinkRequests(
   conversationId: string,
@@ -1405,10 +1415,7 @@ function blockGroupLinkRequests(
 
   void conversation.blockGroupLinkRequests(serviceId);
 
-  return {
-    type: 'NOOP',
-    payload: null,
-  };
+  return noopAction('blockGroupLinkRequests');
 }
 function loadNewerMessages(
   conversationId: string,
@@ -1421,10 +1428,7 @@ function loadNewerMessages(
 
   void conversation.loadNewerMessages(newestMessageId);
 
-  return {
-    type: 'NOOP',
-    payload: null,
-  };
+  return noopAction('loadNewerMessages');
 }
 function loadNewestMessages(
   conversationId: string,
@@ -1438,10 +1442,7 @@ function loadNewestMessages(
 
   void conversation.loadNewestMessages(newestMessageId, setFocus);
 
-  return {
-    type: 'NOOP',
-    payload: null,
-  };
+  return noopAction('loadNewestMessages');
 }
 
 function loadOlderMessages(
@@ -1454,10 +1455,7 @@ function loadOlderMessages(
   }
 
   void conversation.loadOlderMessages(oldestMessageId);
-  return {
-    type: 'NOOP',
-    payload: null,
-  };
+  return noopAction('loadOlderMessages');
 }
 
 function _getAllConversationsInChatFolder(
@@ -1571,20 +1569,19 @@ function removeMember(
     task: () => conversation.removeFromGroupV2(memberConversationId),
   });
 
-  return {
-    type: 'NOOP',
-    payload: null,
-  };
+  return noopAction('removeMember');
 }
 
-function filterAvatarData(
+export function filterAvatarData(
   avatars: ReadonlyArray<AvatarDataType>,
   data: AvatarDataType
 ): Array<AvatarDataType> {
   return avatars.filter(avatarData => !isSameAvatarData(data, avatarData));
 }
 
-function getNextAvatarId(avatars: ReadonlyArray<AvatarDataType>): number {
+export function getNextAvatarId(
+  avatars: ReadonlyArray<AvatarDataType>
+): number {
   return Math.max(...avatars.map(x => Number(x.id))) + 1;
 }
 
@@ -1665,10 +1662,7 @@ function changeHasGroupLink(
       idForLogging: conversation.idForLogging(),
       task: async () => conversation.toggleGroupLink(value),
     });
-    dispatch({
-      type: 'NOOP',
-      payload: null,
-    });
+    dispatch(noopAction('changeHasGroupLink'));
   };
 }
 
@@ -1687,10 +1681,7 @@ function setAnnouncementsOnly(
       idForLogging: conversation.idForLogging(),
       task: async () => conversation.updateAnnouncementsOnly(value),
     });
-    dispatch({
-      type: 'NOOP',
-      payload: null,
-    });
+    dispatch(noopAction('setAnnouncementsOnly'));
   };
 }
 
@@ -1709,10 +1700,7 @@ function setAccessControlMembersSetting(
       idForLogging: conversation.idForLogging(),
       task: async () => conversation.updateAccessControlMembers(value),
     });
-    dispatch({
-      type: 'NOOP',
-      payload: null,
-    });
+    dispatch(noopAction('setAccessControlMembersSetting'));
   };
 }
 
@@ -1733,10 +1721,7 @@ function setAccessControlMemberLabelSetting(
       idForLogging: conversation.idForLogging(),
       task: async () => conversation.updateAccessControlMemberLabel(value),
     });
-    dispatch({
-      type: 'NOOP',
-      payload: null,
-    });
+    dispatch(noopAction('setAccessControlMemberLabelSetting'));
   };
 }
 
@@ -1757,10 +1742,7 @@ function setAccessControlAttributesSetting(
       idForLogging: conversation.idForLogging(),
       task: async () => conversation.updateAccessControlAttributes(value),
     });
-    dispatch({
-      type: 'NOOP',
-      payload: null,
-    });
+    dispatch(noopAction('setAccessControlAttributesSetting'));
   };
 }
 
@@ -1785,33 +1767,42 @@ function setDisappearingMessages(
           version: undefined,
         }),
     });
-    dispatch({
-      type: 'NOOP',
-      payload: null,
-    });
+    dispatch(noopAction('setDisappearingMessages'));
   };
 }
 
-function setDontNotifyForMentionsIfMuted(
+function setNotifyWhileMuted(
+  conversationId: string,
+  key: NotifyWhileMutedKey,
+  newValue: boolean
+): NoopActionType {
+  const conversation = window.ConversationController.get(conversationId);
+  if (!conversation) {
+    throw new Error('setNotifyWhileMuted: No conversation found');
+  }
+
+  conversation.setNotifyWhileMuted(key, newValue);
+
+  return noopAction('setNotifyWhileMuted');
+}
+
+function setShowUnreadReminders(
   conversationId: string,
   newValue: boolean
 ): NoopActionType {
   const conversation = window.ConversationController.get(conversationId);
   if (!conversation) {
-    throw new Error('setDontNotifyForMentionsIfMuted: No conversation found');
+    throw new Error('setShowUnreadReminders: No conversation found');
   }
 
-  conversation.setDontNotifyForMentionsIfMuted(newValue);
+  conversation.setShowUnreadReminders(newValue);
 
-  return {
-    type: 'NOOP',
-    payload: null,
-  };
+  return noopAction('setShowUnreadReminders');
 }
 
 function setChatFolderMuteExpiration(
   chatFolderId: ChatFolderId,
-  muteExpiresAt: number
+  muteExpiration: MuteExpiration
 ): ThunkAction<void, RootStateType, unknown, NoopActionType> {
   return async (dispatch, getState) => {
     const chatFolderConversations = _getAllConversationsInChatFolder(
@@ -1820,30 +1811,23 @@ function setChatFolderMuteExpiration(
     );
 
     for (const conversation of chatFolderConversations) {
-      dispatch(setMuteExpiration(conversation.id, muteExpiresAt));
+      dispatch(setMuteExpiration(conversation.id, muteExpiration));
     }
   };
 }
 
 function setMuteExpiration(
   conversationId: string,
-  muteExpiresAt = 0
+  muteExpiration: MuteExpiration = MuteExpiration.UNMUTED
 ): NoopActionType {
   const conversation = window.ConversationController.get(conversationId);
   if (!conversation) {
     throw new Error('setMuteExpiration: No conversation found');
   }
 
-  conversation.setMuteExpiration(
-    muteExpiresAt >= Number.MAX_SAFE_INTEGER
-      ? muteExpiresAt
-      : Date.now() + muteExpiresAt
-  );
+  conversation.setMuteExpiration(muteExpiration);
 
-  return {
-    type: 'NOOP',
-    payload: null,
-  };
+  return noopAction('setMuteExpiration');
 }
 
 function setPinned(
@@ -1860,12 +1844,14 @@ function setPinned(
       'pinnedConversationIds',
       new Array<string>()
     );
+    const maxPinnedConversations = getPinnedConversationLimit();
 
-    if (pinnedConversationIds.length >= 4) {
+    if (pinnedConversationIds.length >= maxPinnedConversations) {
       return {
         type: SHOW_TOAST,
         payload: {
           toastType: ToastType.PinnedConversationsFull,
+          maxPinnedConversations,
         },
       };
     }
@@ -1874,10 +1860,7 @@ function setPinned(
     conversation.unpin();
   }
 
-  return {
-    type: 'NOOP',
-    payload: null,
-  };
+  return noopAction('setPinned');
 }
 
 function deleteMessages({
@@ -1952,6 +1935,10 @@ function deleteMessages({
       return;
     }
 
+    if (!window.ConversationController.doWeHaveOtherDevices()) {
+      return;
+    }
+
     const chunks = chunk(messages, MAX_MESSAGE_COUNT);
     const conversationToDelete = getConversationIdentifier(
       conversation.attributes
@@ -2013,10 +2000,7 @@ function destroyMessages(
       },
     });
 
-    dispatch({
-      type: 'NOOP',
-      payload: null,
-    });
+    dispatch(noopAction('destroyMessages'));
   };
 }
 
@@ -2099,9 +2083,13 @@ function setMessageToEdit(
         : undefined;
     }
 
-    const draftBodyRanges = processBodyRanges(message, {
-      conversationSelector: getConversationSelector(getState()),
-    });
+    const draftBodyRanges = processBodyRanges(
+      message,
+      isGroup(conversation.attributes),
+      {
+        conversationSelector: getConversationSelector(getState()),
+      }
+    );
     conversation.set({
       draftEditMessage: {
         body: message.body,
@@ -2139,10 +2127,7 @@ function generateNewGroupLink(
       task: async () => conversation.refreshGroupLink(),
     });
 
-    dispatch({
-      type: 'NOOP',
-      payload: null,
-    });
+    dispatch(noopAction('generateNewGroupLink'));
   };
 }
 
@@ -2239,10 +2224,7 @@ function setAccessControlAddFromInviteLinkSetting(
         conversation.updateAccessControlAddFromInviteLink(value),
     });
 
-    dispatch({
-      type: 'NOOP',
-      payload: null,
-    });
+    dispatch(noopAction('setAccessControlAddFromInviteLinkSetting'));
   };
 }
 
@@ -2327,7 +2309,7 @@ function saveAvatarToDisk(
 }
 
 function myProfileChanged(
-  profileData: ProfileDataType,
+  profileData: ProfileDataType | undefined,
   avatarUpdateOptions: AvatarUpdateOptionsType
 ): ThunkAction<void, RootStateType, unknown, SetProfileUpdateErrorActionType> {
   return async (dispatch, getState) => {
@@ -2431,6 +2413,14 @@ function resetAllChatColors(): ThunkAction<
   };
 }
 
+function resetAllNotificationSettings(): NoopActionType {
+  for (const conversation of window.ConversationController.getAll()) {
+    conversation.resetNotificationSettings();
+  }
+
+  return noopAction('resetAllNotificationSettings');
+}
+
 function kickOffAttachmentDownload(
   options: Readonly<{ messageId: string }>
 ): ThunkAction<void, RootStateType, unknown, NoopActionType> {
@@ -2450,10 +2440,7 @@ function kickOffAttachmentDownload(
       drop(window.MessageCache.saveMessage(message.attributes));
     }
 
-    dispatch({
-      type: 'NOOP',
-      payload: null,
-    });
+    dispatch(noopAction('kickOffAttachmentDownload'));
   };
 }
 
@@ -2490,10 +2477,7 @@ function cancelAttachmentDownload({
 
     await DataWriter.removeAttachmentDownloadJobsForMessage(messageId);
 
-    dispatch({
-      type: 'NOOP',
-      payload: null,
-    });
+    dispatch(noopAction('cancelAttachmentDownload'));
   };
 }
 
@@ -2508,10 +2492,7 @@ function markAttachmentAsCorrupted(
   return async dispatch => {
     await doMarkAttachmentAsCorrupted(options.messageId, options.attachment);
 
-    dispatch({
-      type: 'NOOP',
-      payload: null,
-    });
+    dispatch(noopAction('markAttachmentAsCorrupted'));
   };
 }
 
@@ -2636,10 +2617,7 @@ function retryMessageSend(
       );
     }
 
-    dispatch({
-      type: 'NOOP',
-      payload: null,
-    });
+    dispatch(noopAction('retryMessageSend'));
   };
 }
 
@@ -2658,14 +2636,11 @@ function sendPollVote({
       // TODO DESKTOP-9343: show toast on exception
     }
 
-    dispatch({
-      type: 'NOOP',
-      payload: null,
-    });
+    dispatch(noopAction('sendPollVote'));
   };
 }
 
-export function copyMessageText(
+function copyMessageText(
   messageId: string
 ): ThunkAction<void, RootStateType, unknown, NoopActionType> {
   return async dispatch => {
@@ -2675,16 +2650,13 @@ export function copyMessageText(
     }
 
     const body = getNotificationTextForMessage(message.attributes);
-    clipboard.writeText(body);
+    await navigator.clipboard.writeText(body);
 
-    dispatch({
-      type: 'NOOP',
-      payload: null,
-    });
+    dispatch(noopAction('copyMessageText'));
   };
 }
 
-export function retryDeleteForEveryone(
+function retryDeleteForEveryone(
   messageId: string
 ): ThunkAction<void, RootStateType, unknown, NoopActionType> {
   return async dispatch => {
@@ -2731,10 +2703,7 @@ export function retryDeleteForEveryone(
       );
       await conversationJobQueue.add(jobData);
 
-      dispatch({
-        type: 'NOOP',
-        payload: null,
-      });
+      dispatch(noopAction('retryDeleteForEveryone'));
     } catch (error) {
       log.error(
         'retryDeleteForEveryone: Failed to queue delete for everyone',
@@ -3121,6 +3090,7 @@ function createGroup(
           ),
         },
       });
+      // oxlint-disable-next-line typescript/await-thenable
       await showConversation({
         conversationId: conversation.id,
         switchToAssociatedView: true,
@@ -3174,10 +3144,7 @@ function terminateGroup(
           );
         }
       } else {
-        dispatch({
-          type: 'NOOP',
-          payload: null,
-        });
+        dispatch(noopAction('terminateGroup'));
       }
     } catch {
       dispatch({
@@ -3199,7 +3166,8 @@ function removeAllConversations(): RemoveAllConversationsActionType {
 
 function targetMessage(
   messageId: string,
-  conversationId: string
+  conversationId: string,
+  targetedMessageSource: TargetedMessageSource
 ): ThunkAction<void, RootStateType, unknown, MessageTargetedActionType> {
   return async (dispatch, getState) => {
     const selectedConversationId = getSelectedConversationId(getState());
@@ -3215,6 +3183,7 @@ function targetMessage(
       type: 'MESSAGE_TARGETED',
       payload: {
         messageId,
+        targetedMessageSource,
       },
     });
   };
@@ -3308,10 +3277,7 @@ function getProfilesForConversation(conversationId: string): NoopActionType {
 
   drop(conversation.getProfiles());
 
-  return {
-    type: 'NOOP',
-    payload: null,
-  };
+  return noopAction('getProfilesForConversation');
 }
 
 function conversationStoppedByMissingVerification(payload: {
@@ -3339,7 +3305,7 @@ function conversationStoppedByMissingVerification(payload: {
   };
 }
 
-export function markOpenConversationRead(
+function markOpenConversationRead(
   conversationId: string
 ): ThunkAction<void, RootStateType, unknown, MarkReadActionType> {
   return async (dispatch, getState) => {
@@ -3359,7 +3325,7 @@ export function markOpenConversationRead(
   };
 }
 
-export function messageChanged(
+function messageChanged(
   id: string,
   conversationId: string,
   data: ReadonlyMessageAttributesType
@@ -3494,6 +3460,7 @@ function messagesReset({
   metrics,
   pinnedMessagesPreloadData,
   scrollToMessageId,
+  shouldHighlight,
   unboundedFetch,
 }: MessagesResetOptionsType): ThunkAction<
   void,
@@ -3507,8 +3474,7 @@ function messagesReset({
     for (const message of messages) {
       strictAssert(
         message.conversationId === conversationId,
-        `messagesReset(${conversationId}): invalid message conversationId ` +
-          `${message.conversationId}`
+        `messagesReset(${conversationId}): invalid message conversationId ${message.conversationId}`
       );
     }
 
@@ -3522,6 +3488,7 @@ function messagesReset({
         pinnedMessagesPreloadData,
         selectedConversationId,
         scrollToMessageId,
+        shouldHighlight,
       },
     });
   };
@@ -3533,8 +3500,7 @@ function addPreloadData(
   for (const message of messages) {
     strictAssert(
       message.conversationId === conversationId,
-      `addPreloadData(${conversationId}): invalid message conversationId ` +
-        `${message.conversationId}`
+      `addPreloadData(${conversationId}): invalid message conversationId ${message.conversationId}`
     );
   }
 
@@ -3672,10 +3638,7 @@ function deleteMessagesForEveryone(
         },
       });
     } else {
-      dispatch({
-        type: 'NOOP',
-        payload: null,
-      });
+      dispatch(noopAction('deleteMessagesForEveryone'));
     }
   };
 }
@@ -3737,10 +3700,7 @@ function approvePendingMembershipFromGroupV2(
       });
     }
 
-    dispatch({
-      type: 'NOOP',
-      payload: null,
-    });
+    dispatch(noopAction('approvePendingMembershipFromGroupV2'));
   };
 }
 
@@ -3814,10 +3774,7 @@ function revokePendingMembershipsFromGroupV2(
       });
     }
 
-    dispatch({
-      type: 'NOOP',
-      payload: null,
-    });
+    dispatch(noopAction('revokePendingMembershipsFromGroupV2'));
   };
 }
 
@@ -3832,16 +3789,21 @@ async function syncMessageRequestResponse(
     response,
     {
       source: MessageRequestResponseSource.LOCAL,
-      timestamp: Date.now(),
+      blockedAt: Date.now(),
     },
     { shouldSave }
   );
 
+  // Signal conversation block status is synced via storage service's AccountRecord
+  if (isSignalConversation(conversation)) {
+    return;
+  }
+
   const groupId = conversation.getGroupIdBuffer();
 
-  if (window.ConversationController.areWePrimaryDevice()) {
+  if (!window.ConversationController.doWeHaveOtherDevices()) {
     log.warn(
-      'syncMessageRequestResponse: We are primary device; not sending message request sync'
+      'syncMessageRequestResponse: We have no other devices; not sending message request sync'
     );
     return;
   }
@@ -3870,17 +3832,27 @@ async function syncMessageRequestResponse(
   }
 }
 
-function getConversationForReportSpam(
+function getDirectConversationForReportSpam(
   conversation: ConversationType
 ): ConversationType | null {
+  const ourAci = itemStorage.user.getAci();
+
   if (conversation.type === 'group') {
-    const addedBy = getAddedByForOurPendingInvitation(conversation);
+    const addedBy = getAddedByForGroup(conversation);
     if (addedBy == null) {
       log.error(
-        `getConversationForReportSpam: No addedBy found for ${conversation.id}`
+        `getDirectConversationForReportSpam: No addedBy found for ${conversation.id}`
       );
       return null;
     }
+
+    if (addedBy.serviceId === ourAci) {
+      log.warn(
+        "getDirectConversationForReportSpam: We added ourself to this group, but can't report ourself for spam."
+      );
+      return null;
+    }
+
     return addedBy;
   }
 
@@ -3900,19 +3872,23 @@ function reportSpam(
       return;
     }
 
-    const conversation = getConversationForReportSpam(conversationOrGroup);
+    const conversationForSpam =
+      getDirectConversationForReportSpam(conversationOrGroup);
     const conversationModel = window.ConversationController.get(
-      conversation?.id
+      conversationOrGroup?.id
     );
-    if (!conversation || !conversationModel) {
+    if (!conversationForSpam || !conversationModel) {
       log.error(
-        `reportSpam: Conversation for report spam not found ${conversation?.id}. Doing nothing.`
+        `reportSpam: Conversation for report spam not found ${conversationForSpam?.id}. Doing nothing.`
       );
       return;
     }
 
     const messageRequestEnum = Proto.SyncMessage.MessageRequestResponse.Type;
-    const idForLogging = getConversationIdForLogging(conversation);
+    const idForLogging = getConversationIdForLogging(conversationForSpam);
+    const groupConversationId = isGroup(conversationOrGroup)
+      ? conversationOrGroup.id
+      : undefined;
 
     drop(
       longRunningTaskWrapper({
@@ -3925,9 +3901,10 @@ function reportSpam(
               messageRequestEnum.SPAM
             ),
             addReportSpamJob({
-              conversation,
+              directConversation: conversationForSpam,
               getMessageServerGuidsForSpam:
                 DataReader.getMessageServerGuidsForSpam,
+              groupConversationId,
               jobQueue: reportSpamJobQueue,
             }),
           ]);
@@ -3958,7 +3935,7 @@ function blockAndReportSpam(
     }
 
     const conversationForSpam =
-      getConversationForReportSpam(conversationOrGroup);
+      getDirectConversationForReportSpam(conversationOrGroup);
     const conversationModel = window.ConversationController.get(
       conversationForSpam?.id
     );
@@ -3968,8 +3945,12 @@ function blockAndReportSpam(
       );
       return;
     }
+
     const messageRequestEnum = Proto.SyncMessage.MessageRequestResponse.Type;
     const idForLogging = getConversationIdForLogging(conversationOrGroup);
+    const groupConversationId = isGroup(conversationOrGroup)
+      ? conversationOrGroup.id
+      : undefined;
 
     if (conversationModel.getAci()) {
       drop(
@@ -3982,13 +3963,13 @@ function blockAndReportSpam(
                 conversationModel,
                 messageRequestEnum.BLOCK_AND_SPAM
               ),
-              conversationForSpam != null &&
-                addReportSpamJob({
-                  conversation: conversationForSpam,
-                  getMessageServerGuidsForSpam:
-                    DataReader.getMessageServerGuidsForSpam,
-                  jobQueue: reportSpamJobQueue,
-                }),
+              addReportSpamJob({
+                directConversation: conversationForSpam,
+                getMessageServerGuidsForSpam:
+                  DataReader.getMessageServerGuidsForSpam,
+                groupConversationId,
+                jobQueue: reportSpamJobQueue,
+              }),
             ]);
 
             dispatch({
@@ -4000,7 +3981,7 @@ function blockAndReportSpam(
           },
         })
       );
-    } else {
+    } else if (window.ConversationController.doWeHaveOtherDevices()) {
       try {
         await singleProtoJobQueue.add(
           MessageSender.getBlockSync(itemStorage.blocked.getBlockedData())
@@ -4047,7 +4028,7 @@ function acceptConversation(
         messageRequestEnum.ACCEPT,
         {
           source: MessageRequestResponseSource.LOCAL,
-          timestamp: Date.now(),
+          blockedAt: Date.now(),
         },
         { shouldSave: true }
       );
@@ -4064,10 +4045,7 @@ function acceptConversation(
       }
     }
 
-    dispatch({
-      type: 'NOOP',
-      payload: null,
-    });
+    dispatch(noopAction('acceptConversation'));
   };
 }
 
@@ -4126,7 +4104,7 @@ function blockConversation(
         messageRequestEnum.BLOCK,
         {
           source: MessageRequestResponseSource.LOCAL,
-          timestamp: Date.now(),
+          blockedAt: Date.now(),
         },
         { shouldSave: true }
       );
@@ -4143,10 +4121,7 @@ function blockConversation(
       }
     }
 
-    dispatch({
-      type: 'NOOP',
-      payload: null,
-    });
+    dispatch(noopAction('blockConversation'));
   };
 }
 
@@ -4181,10 +4156,7 @@ function deleteConversation(
       await conversation.destroyMessages({ source: 'local-delete' });
     }
 
-    dispatch({
-      type: 'NOOP',
-      payload: null,
-    });
+    dispatch(noopAction('deleteConversation'));
   };
 }
 
@@ -4202,10 +4174,7 @@ function initiateMigrationToGroupV2(conversationId: string): NoopActionType {
     task: () => doInitiateMigrationToGroupV2(conversation),
   });
 
-  return {
-    type: 'NOOP',
-    payload: null,
-  };
+  return noopAction('initiateMigrationToGroupV2');
 }
 
 export type SaveAttachmentActionCreatorType = ReadonlyDeep<
@@ -4220,7 +4189,13 @@ function saveAttachment(
   return async dispatch => {
     const { fileName = '' } = attachment;
 
-    const isDangerous = isFileDangerous(fileName);
+    const isDangerous = isFileDangerous(
+      fileName ||
+        Attachment.getSuggestedFilename({
+          attachment,
+          scenario: 'saving-locally',
+        })
+    );
 
     if (isDangerous) {
       dispatch({
@@ -4285,7 +4260,13 @@ function saveAttachments(
     for (const attachment of attachments) {
       const { fileName = '' } = attachment;
 
-      const isDangerous = isFileDangerous(fileName);
+      const isDangerous = isFileDangerous(
+        fileName ||
+          Attachment.getSuggestedFilename({
+            attachment,
+            scenario: 'saving-locally',
+          })
+      );
       if (isDangerous) {
         dispatch({
           type: SHOW_TOAST,
@@ -4430,7 +4411,7 @@ function closeRecommendedGroupSizeModal(): CloseRecommendedGroupSizeModalActionT
   return { type: 'CLOSE_RECOMMENDED_GROUP_SIZE_MODAL' };
 }
 
-export function scrollToOldestUnreadMention(
+function scrollToOldestUnreadMention(
   conversationId: string
 ): ThunkAction<void, RootStateType, unknown, NoopActionType> {
   return async (dispatch, getState) => {
@@ -4507,7 +4488,7 @@ export function scrollToMessage(
       return;
     }
 
-    drop(conversation.loadAndScroll(messageId));
+    drop(conversation.loadAndScroll(messageId, { shouldHighlight: true }));
   };
 }
 
@@ -4609,10 +4590,7 @@ function toggleHideStories(
     if (conversationModel) {
       conversationModel.toggleHideStories();
     }
-    dispatch({
-      type: 'NOOP',
-      payload: null,
-    });
+    dispatch(noopAction('toggleHideStories'));
   };
 }
 
@@ -4630,10 +4608,7 @@ function removeMemberFromGroup(
         task: () => conversationModel.removeFromGroupV2(contactId),
       });
     }
-    dispatch({
-      type: 'NOOP',
-      payload: null,
-    });
+    dispatch(noopAction('removeMemberFromGroup'));
   };
 }
 
@@ -4677,10 +4652,6 @@ function addMembersToGroup(
   };
 }
 
-// oxlint-disable-next-line typescript/no-explicit-any
-export type ActionCreator<T extends (...params: Array<any>) => any> =
-  ReadonlyDeep<(...params: Parameters<T>) => void>;
-
 export type UpdateGroupAttributesType = ReadonlyDeep<
   ActionCreator<typeof updateGroupAttributes>
 >;
@@ -4719,6 +4690,13 @@ function updateGroupAttributes(
             attributes
           ),
       });
+      if (attributes.title) {
+        conversation.set({
+          groupVerifiedNameHash: computeGroupNameHash(attributes.title),
+        });
+        await DataWriter.updateConversation(conversation.attributes);
+        conversation.captureChange('groupVerifiedNameHash');
+      }
       onSuccess?.();
     } catch {
       onFailure?.();
@@ -4736,7 +4714,7 @@ function updateGroupMemberLabel(
     labelString,
   }: {
     conversationId: string;
-    labelEmoji: string | undefined;
+    labelEmoji: Emoji.Variant | undefined;
     labelString: string | undefined;
   },
   {
@@ -4809,10 +4787,7 @@ function toggleGroupsForStorySend(
       })
     );
 
-    dispatch({
-      type: 'NOOP',
-      payload: null,
-    });
+    dispatch(noopAction('toggleGroupsForStorySend'));
   };
 }
 
@@ -4825,10 +4800,7 @@ function toggleAdmin(
     if (conversationModel) {
       void conversationModel.toggleAdmin(contactId);
     }
-    dispatch({
-      type: 'NOOP',
-      payload: null,
-    });
+    dispatch(noopAction('toggleAdmin'));
   };
 }
 
@@ -4905,6 +4877,7 @@ function showConversation({
     });
 
     // Attempt to change the location - note that this might be canceled
+    // oxlint-disable-next-line typescript/await-thenable
     await changeLocation({
       tab: NavTab.Chats,
       details: {
@@ -4941,7 +4914,7 @@ function showConversation({
 function onConversationOpened(
   conversationId: string,
   messageId: string | undefined,
-  targetedMessageSource: TargetedMessageSource | undefined
+  targetedMessageSource: TargetedMessageSource | null
 ): ThunkAction<
   void,
   RootStateType,
@@ -4996,6 +4969,8 @@ function onConversationOpened(
             ? Promise.resolve()
             : conversation.loadNewestMessages(undefined, undefined),
           conversation.updateLastMessage(),
+          // FIXME
+          // oxlint-disable-next-line typescript/await-thenable
           conversation.throttledUpdateUnread(),
         ])
       );
@@ -5090,6 +5065,7 @@ function onConversationClosed(
 
     // If we're still on this conversation, but we want to close it, go to splash screen
     if (selectedConversationId === conversationId) {
+      // oxlint-disable-next-line typescript/await-thenable
       await changeLocation({
         tab: NavTab.Chats,
         details: {
@@ -5129,10 +5105,7 @@ function doubleCheckMissingQuoteReference(messageId: string): NoopActionType {
     drop(doDoubleCheckMissingQuoteReference(message));
   }
 
-  return {
-    type: 'NOOP',
-    payload: null,
-  };
+  return noopAction('doubleCheckMissingQuoteReference');
 }
 
 function setPendingRequestedAvatarDownload(
@@ -5232,7 +5205,7 @@ function onPinnedMessagesChanged(
 
 function onPinnedMessageAdd(
   targetMessageId: string,
-  pinDurationSeconds: DurationInSeconds | null
+  pinDurationSeconds: DurationSecs | null
 ): StateThunk {
   return async dispatch => {
     const target = await getPinnedMessageTarget(targetMessageId);
@@ -5245,7 +5218,7 @@ function onPinnedMessageAdd(
     );
     strictAssert(targetConversation != null, 'Missing target conversation');
 
-    const pinnedAt = Date.now();
+    const pinnedAt = SentTimestampMs.now();
 
     await conversationJobQueue.add({
       type: conversationQueueJobEnum.enum.PinMessage,
@@ -5291,7 +5264,7 @@ function onPinnedMessageRemove(targetMessageId: string): StateThunk {
     await conversationJobQueue.add({
       type: conversationQueueJobEnum.enum.UnpinMessage,
       ...target,
-      unpinnedAt: Date.now(),
+      unpinnedAt: TimestampMs.now(),
       isSyncOnly: false,
     });
     await DataWriter.deletePinnedMessageByMessageId(targetMessageId);
@@ -5313,9 +5286,9 @@ export function getEmptyState(): ConversationsStateType {
     lastCenterMessageByConversation: {},
     messagesByConversation: {},
     messagesLookup: {},
-    targetedMessage: undefined,
+    targetedMessage: null,
     targetedMessageCounter: 0,
-    targetedMessageSource: undefined,
+    targetedMessageSource: null,
     lastSelectedMessage: undefined,
     selectedMessageIds: undefined,
     showArchived: false,
@@ -5651,6 +5624,7 @@ function updateMessageLookup(
     metrics,
     selectedConversationId,
     scrollToMessageId,
+    shouldHighlight,
     unboundedFetch,
     pinnedMessagesPreloadData,
   }: MessagesResetDataType
@@ -5700,7 +5674,9 @@ function updateMessageLookup(
       ? {
           targetedMessage: scrollToMessageId,
           targetedMessageCounter: state.targetedMessageCounter + 1,
-          targetedMessageSource: TargetedMessageSource.Reset,
+          targetedMessageSource: shouldHighlight
+            ? TargetedMessageSource.NavigateToMessage
+            : TargetedMessageSource.Reset,
         }
       : {}),
     messagesLookup: {
@@ -6110,7 +6086,7 @@ export function reducer(
       ...state,
       targetedMessage: messageId,
       targetedMessageCounter: state.targetedMessageCounter + 1,
-      targetedMessageSource: TargetedMessageSource.Focus,
+      targetedMessageSource: action.payload.targetedMessageSource,
     };
   }
 
@@ -6191,7 +6167,7 @@ export function reducer(
       verificationDataByConversation: nextVerificationData,
     };
   }
-  if (action.type === DELETE_LIST) {
+  if (action.type === DELETE_LIST || action.type === MARK_AS_DELETED) {
     const { listId } = action.payload;
 
     const nextVerificationData = visitListsInVerificationData(
@@ -6873,9 +6849,9 @@ export function reducer(
   if (action.type === 'CLEAR_TARGETED_MESSAGE') {
     return {
       ...state,
-      targetedMessage: undefined,
+      targetedMessage: null,
       targetedMessageCounter: 0,
-      targetedMessageSource: undefined,
+      targetedMessageSource: null,
     };
   }
   if (action.type === 'CLEAR_UNREAD_METRICS') {
@@ -6914,7 +6890,7 @@ export function reducer(
           ? state.preloadData
           : undefined,
       hasContactSpoofingReview: false,
-      targetedMessage: messageId,
+      targetedMessage: messageId ?? null,
       targetedMessageSource: messageId
         ? TargetedMessageSource.NavigateToMessage
         : TargetedMessageSource.Reset,

@@ -1,8 +1,8 @@
 // Copyright 2018 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import type { CSSProperties } from 'react';
-import React, { useCallback } from 'react';
+import type { CSSProperties, JSX, MouseEvent, KeyboardEvent } from 'react';
+import { useCallback } from 'react';
 import classNames from 'classnames';
 
 import { ImageOrBlurhash } from '../ImageOrBlurhash.dom.tsx';
@@ -33,7 +33,6 @@ export type Props = {
   width?: number;
   cropWidth?: number;
   cropHeight?: number;
-  tabIndex?: number;
 
   overlayText?: string;
 
@@ -84,13 +83,12 @@ export function Image({
   onError,
   overlayText,
   playIconOverlay,
-  tabIndex,
   theme,
   url,
   width = 0,
   cropWidth = 0,
   cropHeight = 0,
-}: Props): React.JSX.Element {
+}: Props): JSX.Element {
   const resolvedBlurHash = blurHash || defaultBlurHash(theme);
 
   const curveStyles: CSSProperties = {
@@ -101,7 +99,7 @@ export function Image({
   };
 
   const showVisualAttachmentClick = useCallback(
-    (event: React.MouseEvent) => {
+    (event: MouseEvent) => {
       if (showVisualAttachment) {
         event.preventDefault();
         event.stopPropagation();
@@ -111,11 +109,11 @@ export function Image({
     [attachment, showVisualAttachment]
   );
   const showVisualAttachmentKeyDown = useCallback(
-    (event: React.KeyboardEvent<HTMLButtonElement>) => {
-      if (
-        showVisualAttachment &&
-        (event.key === 'Enter' || event.key === 'Space')
-      ) {
+    (event: KeyboardEvent<HTMLButtonElement>) => {
+      if (showVisualAttachment == null) {
+        return;
+      }
+      if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
         event.stopPropagation();
         showVisualAttachment(attachment);
@@ -124,7 +122,7 @@ export function Image({
     [attachment, showVisualAttachment]
   );
   const cancelDownloadClick = useCallback(
-    (event: React.MouseEvent) => {
+    (event: MouseEvent) => {
       if (cancelDownload) {
         event.preventDefault();
         event.stopPropagation();
@@ -134,7 +132,7 @@ export function Image({
     [cancelDownload]
   );
   const cancelDownloadKeyDown = useCallback(
-    (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    (event: KeyboardEvent<HTMLButtonElement>) => {
       if (cancelDownload && (event.key === 'Enter' || event.key === 'Space')) {
         event.preventDefault();
         event.stopPropagation();
@@ -144,7 +142,7 @@ export function Image({
     [cancelDownload]
   );
   const startDownloadClick = useCallback(
-    (event: React.MouseEvent) => {
+    (event: MouseEvent) => {
       if (startDownload) {
         event.preventDefault();
         event.stopPropagation();
@@ -154,7 +152,7 @@ export function Image({
     [startDownload]
   );
   const startDownloadKeyDown = useCallback(
-    (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    (event: KeyboardEvent<HTMLButtonElement>) => {
       if (startDownload && (event.key === 'Enter' || event.key === 'Space')) {
         event.preventDefault();
         event.stopPropagation();
@@ -169,7 +167,6 @@ export function Image({
 
   const imageOrBlurHash = (
     <ImageOrBlurhash
-      onError={onError}
       className="module-image__image"
       alt={alt}
       height={height}
@@ -177,7 +174,9 @@ export function Image({
       intrinsicWidth={attachment.width}
       intrinsicHeight={attachment.height}
       src={url}
-      blurHash={noBackground && url ? undefined : resolvedBlurHash}
+      blurHash={resolvedBlurHash}
+      onError={onError}
+      key={url}
     />
   );
 
@@ -185,13 +184,15 @@ export function Image({
     !attachment.path && !attachment.pending && !isIncremental(attachment) ? (
       <button
         type="button"
-        className="module-image__overlay-circle"
+        className="module-image__border-overlay module-image__border-overlay--with-click-handler"
         aria-label={i18n('icu:startDownload')}
         onClick={startDownloadClick}
         onKeyDown={startDownloadKeyDown}
-        tabIndex={tabIndex}
+        style={curveStyles}
       >
-        <div className="module-image__download-icon" />
+        <span className="module-image__overlay-circle">
+          <span className="module-image__download-icon" />
+        </span>
       </button>
     ) : undefined;
 
@@ -205,7 +206,6 @@ export function Image({
         className="module-image__overlay-circle module-image__overlay-circle--undownloadable"
         aria-label={i18n('icu:mediaNotAvailable')}
         onClick={undownloadableClick}
-        tabIndex={tabIndex}
       >
         <div className="module-image__undownloadable-icon" />
       </button>
@@ -222,7 +222,6 @@ export function Image({
           i18n,
           cancelDownloadClick,
           cancelDownloadKeyDown,
-          tabIndex,
         });
 
   return (
@@ -294,13 +293,12 @@ export function Image({
           style={curveStyles}
           onClick={showVisualAttachmentClick}
           onKeyDown={showVisualAttachmentKeyDown}
-          tabIndex={tabIndex}
         />
       ) : null}
       {closeButton ? (
         <button
           type="button"
-          onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+          onClick={(e: MouseEvent<HTMLButtonElement>) => {
             e.preventDefault();
             e.stopPropagation();
 
@@ -322,16 +320,12 @@ export function getSpinner({
   cancelDownloadClick,
   cancelDownloadKeyDown,
   i18n,
-  tabIndex,
 }: {
   attachment: AttachmentForUIType;
-  cancelDownloadClick: (event: React.MouseEvent) => void;
-  cancelDownloadKeyDown: (
-    event: React.KeyboardEvent<HTMLButtonElement>
-  ) => void;
+  cancelDownloadClick: (event: MouseEvent) => void;
+  cancelDownloadKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
   i18n: LocalizerType;
-  tabIndex: number | undefined;
-}): React.JSX.Element | undefined {
+}): JSX.Element | undefined {
   if (!attachment.pending) {
     return undefined;
   }
@@ -349,7 +343,6 @@ export function getSpinner({
       aria-label={i18n('icu:cancelDownload')}
       onClick={cancelDownloadClick}
       onKeyDown={cancelDownloadKeyDown}
-      tabIndex={tabIndex}
     >
       <div className="module-image__stop-icon" />
       <div className="module-image__progress-circle-wrapper">

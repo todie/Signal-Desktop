@@ -203,11 +203,18 @@ export async function sendDeleteStoryForEveryone(
     })
   );
 
+  if (!window.ConversationController.doWeHaveOtherDevices()) {
+    log.info(`${logId}: We have no other devices; not sending sync`);
+    return;
+  }
+
   // Send sync message exactly once per job. If any of the sends are successful
   // and we didn't send the DOE itself before - it is a good time to send the
   // sync message.
   if (!hadSuccessfulSends && didSuccessfullySendOne) {
     log.info(`${logId}: Sending sync message`);
+
+    // Okay to call outside of queue, since it's for our own conversation
     const options = await getSendOptions(ourConversation.attributes, {
       syncMessage: true,
     });
@@ -255,7 +262,7 @@ export async function sendDeleteStoryForEveryone(
 function doesMessageHaveSuccessfulSends(message: MessageModel): boolean {
   const map = message.get('deletedForEveryoneSendStatus') ?? {};
 
-  return Object.values(map).some(value => value === true);
+  return Object.values(map).includes(true);
 }
 
 async function updateMessageWithSuccessfulSends(

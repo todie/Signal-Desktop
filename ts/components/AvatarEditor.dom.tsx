@@ -1,7 +1,7 @@
 // Copyright 2021 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 import lodash from 'lodash';
 
 import type { AvatarColorType } from '../types/Colors.std.ts';
@@ -23,6 +23,7 @@ import { createAvatarData } from '../util/createAvatarData.std.ts';
 import { isSameAvatarData } from '../util/isSameAvatarData.std.ts';
 import { missingCaseError } from '../util/missingCaseError.std.ts';
 import { useConfirmDiscard } from '../hooks/useConfirmDiscard.dom.tsx';
+import { AxoDialog } from '../axo/AxoDialog.dom.tsx';
 
 const { isEqual } = lodash;
 
@@ -34,6 +35,7 @@ export type PropsType = {
   conversationTitle?: string;
   deleteAvatarFromDisk: DeleteAvatarFromDiskActionType;
   i18n: LocalizerType;
+  isInsideDialog: boolean;
   isGroup?: boolean;
   onCancel: () => unknown;
   onSave: (buffer: Uint8Array<ArrayBuffer> | undefined) => unknown;
@@ -56,13 +58,14 @@ export function AvatarEditor({
   conversationTitle,
   deleteAvatarFromDisk,
   i18n,
+  isInsideDialog,
   isGroup,
   onCancel,
   onSave,
   userAvatarData,
   replaceAvatar,
   saveAvatarToDisk,
-}: PropsType): React.JSX.Element {
+}: PropsType): JSX.Element {
   const [provisionalSelectedAvatar, setProvisionalSelectedAvatar] = useState<
     AvatarDataType | undefined
   >();
@@ -91,6 +94,10 @@ export function AvatarEditor({
   const [confirmDiscardModal, confirmDiscardIf] = useConfirmDiscard({
     i18n,
     name: 'AvatarEditor',
+    // @ts-expect-error ConfirmationDialog migration: Needs title
+    title: null,
+    // @ts-expect-error ConfirmationDialog migration: Needs description
+    description: null,
     tryClose,
   });
 
@@ -101,6 +108,7 @@ export function AvatarEditor({
     const onDiscard = () => undefined;
     confirmDiscardIf(hasChanges, onDiscard);
   }, [confirmDiscardIf, hasChanges]);
+  // oxlint-disable-next-line react/refs
   tryClose.current = onTryClose;
 
   const selectedAvatar = getSelectedAvatar(provisionalSelectedAvatar);
@@ -174,27 +182,27 @@ export function AvatarEditor({
     []
   );
 
-  let content: React.JSX.Element | undefined;
+  let content: JSX.Element | undefined;
 
   if (editMode === EditMode.Main) {
-    content = (
+    const body = (
       <>
-        <div className="AvatarEditor__preview">
-          <AvatarPreview
-            avatarColor={avatarColor}
-            avatarUrl={pendingClear ? undefined : avatarUrl}
-            avatarValue={avatarPreview}
-            conversationTitle={conversationTitle}
-            i18n={i18n}
-            isEditable
-            isGroup={isGroup}
-            onAvatarLoaded={handleAvatarLoaded}
-            onClear={() => {
-              setPendingClear(true);
-              setAvatarPreview(undefined);
-              setProvisionalSelectedAvatar(undefined);
-            }}
-          />
+        <AvatarPreview
+          avatarColor={avatarColor}
+          avatarUrl={pendingClear ? undefined : avatarUrl}
+          avatarValue={avatarPreview}
+          conversationTitle={conversationTitle}
+          i18n={i18n}
+          isEditable
+          isGroup={isGroup}
+          onAvatarLoaded={handleAvatarLoaded}
+          onClear={() => {
+            setPendingClear(true);
+            setAvatarPreview(undefined);
+            setProvisionalSelectedAvatar(undefined);
+          }}
+        />
+        <div className="AvatarEditor__top-buttons__container">
           <div className="AvatarEditor__top-buttons">
             <AvatarUploadButton
               className="AvatarEditor__button AvatarEditor__button--photo"
@@ -251,35 +259,56 @@ export function AvatarEditor({
             />
           ))}
         </div>
-        <AvatarModalButtons
-          hasChanges={hasChanges}
-          i18n={i18n}
-          onCancel={() => {
-            setAvatarPreview(initialAvatar);
-            setPendingClear(false);
-
-            // Delay navigation until new avatar data resolves and we are no longer dirty
-            setTimeout(() => onCancel(), 500);
-          }}
-          onSave={() => {
-            if (selectedAvatar) {
-              replaceAvatar(selectedAvatar, selectedAvatar, conversationId);
-            }
-
-            setInitialAvatar(avatarPreview);
-            setPendingClear(false);
-
-            // Delay navigation until new avatar data resolves and we are no longer dirty
-            setTimeout(() => onSave(avatarPreview), 500);
-          }}
-        />
       </>
     );
+
+    const footer = (
+      <AvatarModalButtons
+        isInsideDialog={isInsideDialog}
+        hasChanges={hasChanges}
+        i18n={i18n}
+        onCancel={() => {
+          setAvatarPreview(initialAvatar);
+          setPendingClear(false);
+
+          // Delay navigation until new avatar data resolves and we are no longer dirty
+          setTimeout(() => onCancel(), 500);
+        }}
+        onSave={() => {
+          if (selectedAvatar) {
+            replaceAvatar(selectedAvatar, selectedAvatar, conversationId);
+          }
+
+          setInitialAvatar(avatarPreview);
+          setPendingClear(false);
+
+          // Delay navigation until new avatar data resolves and we are no longer dirty
+          setTimeout(() => onSave(avatarPreview), 500);
+        }}
+      />
+    );
+
+    if (isInsideDialog) {
+      content = (
+        <>
+          <AxoDialog.Body forceMaxHeight>{body}</AxoDialog.Body>
+          <AxoDialog.Footer>{footer}</AxoDialog.Footer>
+        </>
+      );
+    } else {
+      content = (
+        <>
+          {body}
+          {footer}
+        </>
+      );
+    }
   } else if (editMode === EditMode.Text) {
     content = (
       <AvatarTextEditor
         avatarData={selectedAvatar}
         i18n={i18n}
+        isInsideDialog={isInsideDialog}
         onCancel={() => {
           setEditMode(EditMode.Main);
           if (selectedAvatar) {
@@ -316,6 +345,7 @@ export function AvatarEditor({
       <AvatarIconEditor
         avatarData={selectedAvatar}
         i18n={i18n}
+        isInsideDialog={isInsideDialog}
         onClose={avatarData => {
           if (avatarData) {
             updateAvatarDataList(avatarData, selectedAvatar);

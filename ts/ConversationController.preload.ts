@@ -4,6 +4,7 @@
 import lodash from 'lodash';
 import PQueue from 'p-queue';
 import { v4 as generateUuid } from 'uuid';
+import { MuteExpiration } from '@signalapp/types';
 
 import { DataReader, DataWriter } from './sql/Client.preload.ts';
 import { createLogger } from './logging/log.std.ts';
@@ -40,7 +41,11 @@ import { getTitleNoDefault } from './util/getTitle.preload.ts';
 import * as StorageService from './services/storage.preload.ts';
 import { cdsLookup } from './textsecure/WebAPI.preload.ts';
 import type { ConversationPropsForUnreadStats } from './util/countUnreadStats.std.ts';
-import { countAllConversationsUnreadStats } from './util/countUnreadStats.std.ts';
+import {
+  countAllConversationsUnreadStats,
+  getUnreadCountForBadge,
+} from './util/countUnreadStats.std.ts';
+import { STORAGE_KEY_DEFAULTS } from './types/StorageKeys.std.ts';
 import { isTestOrMockEnvironment } from './environment.std.ts';
 import { isConversationAccepted } from './util/isConversationAccepted.preload.ts';
 import { areWePending } from './util/groupMembershipUtils.preload.ts';
@@ -156,7 +161,7 @@ async function safeCombineConversations(
 
 const MAX_MESSAGE_BODY_LENGTH = 64 * 1024;
 
-const { getAllConversations, getMessagesBySentAt } = DataReader;
+const { getAllConversations } = DataReader;
 
 const {
   migrateConversationMessages,
@@ -172,9 +177,9 @@ export class ConversationController {
   #_initialPromise: undefined | Promise<void>;
 
   #_conversations: Array<ConversationModel> = [];
-  #_conversationOpenStart = new Map<string, number>();
+  readonly #_conversationOpenStart = new Map<string, number>();
   #_hasQueueEmptied = false;
-  #_combineConversationsQueue = new PQueue({ concurrency: 1 });
+  readonly #_combineConversationsQueue = new PQueue({ concurrency: 1 });
   #_signalConversationId: undefined | string;
 
   #delayBeforeUpdatingRedux: (() => number) | undefined;
@@ -187,7 +192,7 @@ export class ConversationController {
   #_byGroupId: Record<string, ConversationModel> = Object.create(null);
   #_byId: Record<string, ConversationModel> = Object.create(null);
 
-  #debouncedUpdateUnreadCount = debounce(
+  readonly #debouncedUpdateUnreadCount = debounce(
     this.updateUnreadCount.bind(this),
     SECOND,
     {
@@ -197,7 +202,7 @@ export class ConversationController {
     }
   );
 
-  #convoUpdateBatcher = createBatcher<
+  readonly #convoUpdateBatcher = createBatcher<
     | { type: 'change' | 'add'; conversation: ConversationModel }
     | { type: 'remove'; id: string }
   >({
@@ -272,9 +277,6 @@ export class ConversationController {
 
     const existing = this.get(conversation.id);
     if (!existing) {
-      log.warn(
-        `conversationChanged: Rejecting change from ${conversation.idForLogging()}, not in lookups`
-      );
       return;
     }
 
@@ -389,6 +391,9 @@ export class ConversationController {
 
     const badgeCountMutedConversationsSetting =
       itemStorage.get('badge-count-muted-conversations') || false;
+    const unreadCountBadgeType =
+      itemStorage.get('unreadCountBadgeType') ??
+      STORAGE_KEY_DEFAULTS.unreadCountBadgeType;
     const { activeProfile } = window.reduxStore.getState().notificationProfiles;
 
     const unreadStats = countAllConversationsUnreadStats(
@@ -419,22 +424,12 @@ export class ConversationController {
 
     drop(itemStorage.put('unreadCount', unreadStats.unreadCount));
 
-    if (unreadStats.unreadCount > 0) {
-      const total =
-        unreadStats.unreadCount + unreadStats.readChatsMarkedUnreadCount;
-      window.IPC.setBadge(total);
-      window.IPC.updateTrayIcon(total);
-      window.document.title = `${window.getTitle()} (${total})`;
-    } else if (unreadStats.readChatsMarkedUnreadCount > 0) {
-      const total = unreadStats.readChatsMarkedUnreadCount;
-      window.IPC.setBadge(total);
-      window.IPC.updateTrayIcon(total);
-      window.document.title = `${window.getTitle()} (${total})`;
-    } else {
-      window.IPC.setBadge(0);
-      window.IPC.updateTrayIcon(0);
-      window.document.title = window.getTitle();
-    }
+    const total = getUnreadCountForBadge(unreadStats, unreadCountBadgeType);
+
+    window.IPC.setBadgeCount(total);
+    window.IPC.updateTrayIcon(total);
+    window.document.title =
+      total > 0 ? `${window.getTitle()} (${total})` : window.getTitle();
   }
 
   onEmpty(): void {
@@ -588,7 +583,7 @@ export class ConversationController {
         // own (that we create on link), it might need to be uploaded to storage
         // service.
         if (conversation.attributes.storageID == null) {
-          StorageService.storageServiceUploadJob({
+          StorageService.runStorageServiceUploadJob({
             reason: 'new conversation',
           });
         }
@@ -645,9 +640,9 @@ export class ConversationController {
   }
 
   getOurConversationId(): string | undefined {
-    const e164 = itemStorage.user.getNumber();
+    const e164 = itemStorage.user.getOptionalNumber();
     const aci = itemStorage.user.getAci();
-    const pni = itemStorage.user.getPni();
+    const pni = itemStorage.user.getOptionalPni();
 
     if (!e164 && !aci && !pni) {
       return undefined;
@@ -691,7 +686,7 @@ export class ConversationController {
 
   async getOrCreateSignalConversation(): Promise<ConversationModel> {
     const conversation = await this.getOrCreateAndWait(SIGNAL_ACI, 'private', {
-      muteExpiresAt: Number.MAX_SAFE_INTEGER,
+      muteExpiresAt: MuteExpiration.ALWAYS,
       profileAvatar: { path: SIGNAL_AVATAR_PATH },
       profileName: 'Signal',
       profileSharing: true,
@@ -722,6 +717,10 @@ export class ConversationController {
     const ourDeviceId = itemStorage.user.getDeviceId();
 
     return ourDeviceId === 1;
+  }
+
+  doWeHaveOtherDevices(): boolean {
+    return !this.areWePrimaryDevice();
   }
 
   // Note: If you don't know what kind of serviceId it is, put it in the 'aci' param.
@@ -955,8 +954,7 @@ export class ConversationController {
       } else if (targetConversation && !targetConversation?.get(key)) {
         // This is mostly for the situation where PNI was erased when updating e164
         log.debug(
-          `${logId}: Re-adding ${key} on target conversation - ` +
-            `${targetConversation.idForLogging()}`
+          `${logId}: Re-adding ${key} on target conversation - ${targetConversation.idForLogging()}`
         );
         applyChangeToConversation(targetConversation, pniSignatureVerified, {
           [key]: value,
@@ -1329,6 +1327,22 @@ export class ConversationController {
       ),
     });
 
+    if (obsolete.isBlocked()) {
+      const e164 = obsolete.get('e164');
+      const e164Block = e164
+        ? itemStorage.blocked.getBlockedNumbers().get(e164)
+        : undefined;
+
+      const serviceId = obsolete.get('serviceId');
+      const serviceIdBlock = serviceId
+        ? itemStorage.blocked.getBlockedServiceIds().get(serviceId)
+        : undefined;
+
+      const timestamp = serviceIdBlock?.blockedAt ?? e164Block?.blockedAt;
+
+      current.block({ viaStorageServiceSync: false, timestamp });
+    }
+
     const obsoleteExpireTimer = obsolete.get('expireTimer');
     const currentExpireTimer = current.get('expireTimer');
     if (
@@ -1413,8 +1427,7 @@ export class ConversationController {
       log.warn(
         `${logId}: Ensure that all V1 groups have new conversationId instead of old`
       );
-      const groups =
-        await this.getAllGroupsInvolvingServiceId(obsoleteServiceId);
+      const groups = this.getAllGroupsInvolvingServiceId(obsoleteServiceId);
       groups.forEach(group => {
         const members = group.get('members');
         const withoutObsolete = without(members, obsoleteId);
@@ -1517,11 +1530,13 @@ export class ConversationController {
     targetFromId: string,
     targetTimestamp: number
   ): Promise<ConversationModel | null | undefined> {
-    const messages = await getMessagesBySentAt(targetTimestamp);
-    const targetMessage = messages.find(m => getAuthorId(m) === targetFromId);
+    const targetMessage = await window.MessageCache.findBySentAt(
+      targetTimestamp,
+      m => getAuthorId(m.attributes) === targetFromId
+    );
 
     if (targetMessage) {
-      return this.get(targetMessage.conversationId);
+      return this.get(targetMessage.get('conversationId'));
     }
 
     return null;
@@ -1575,17 +1590,18 @@ export class ConversationController {
     return this.#_initialPromise;
   }
 
-  // A number of things outside conversation.attributes affect conversation re-rendering.
-  //   If it's scoped to a given conversation, it's easy to trigger('change'). There are
-  //   important values in storage and the storage service which change rendering pretty
-  //   radically, so this function is necessary to force regeneration of props.
-  async forceRerender(identifiers?: Array<string>): Promise<void> {
+  // When the user changes their avatar preferences (address book vs. signal profile), we
+  // need to regenerate all cached conversation props. But only if that contact had an
+  // avatar taken from the address book.
+  async rerenderAfterAvatarChange(): Promise<void> {
     let count = 0;
-    const conversations = identifiers
-      ? identifiers.map(identifier => this.get(identifier)).filter(isNotNil)
-      : this.#_conversations.slice();
+    const conversations = this.#_conversations.filter(
+      conversation =>
+        conversation.get('avatar') &&
+        isDirectConversation(conversation.attributes)
+    );
     log.info(
-      `forceRerender: Starting to loop through ${conversations.length} conversations`
+      `rerenderAfterAvatarChange: Starting to loop through ${conversations.length} conversations`
     );
 
     for (const conversation of conversations) {
@@ -1602,7 +1618,7 @@ export class ConversationController {
         await sleep(300);
       }
     }
-    log.info(`forceRerender: Updated ${count} conversations`);
+    log.info(`rerenderAfterAvatarChange: Updated ${count} conversations`);
   }
 
   onConvoOpenStart(conversationId: string): void {
@@ -1748,7 +1764,6 @@ export class ConversationController {
       const queue = new PQueue({
         concurrency: 3,
         timeout: MINUTE * 30,
-        throwOnTimeout: true,
       });
       drop(
         queue.addAll(

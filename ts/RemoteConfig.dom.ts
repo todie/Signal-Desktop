@@ -36,6 +36,8 @@ const SemverKeys = [
   'desktop.adminDelete.send.prod',
   'desktop.binaryServiceId.beta',
   'desktop.binaryServiceId.prod',
+  'desktop.disappearingCalls.beta',
+  'desktop.disappearingCalls.prod',
   'desktop.groupMemberLabels.edit.beta',
   'desktop.groupMemberLabels.edit.prod',
   'desktop.groupTerminate.send.beta',
@@ -44,33 +46,41 @@ const SemverKeys = [
   'desktop.keyTransparency.prod',
   'desktop.localBackups.beta',
   'desktop.localBackups.prod',
-  'desktop.plaintextExport.beta',
-  'desktop.plaintextExport.prod',
   'desktop.pollSend1to1.beta',
   'desktop.pollSend1to1.prod',
   'desktop.remoteMute.send.beta',
   'desktop.remoteMute.send.prod',
   'desktop.retireAccessKeyGroupSend.beta',
   'desktop.retireAccessKeyGroupSend.prod',
+  'desktop.sendMessageViaLibsignal.beta',
+  'desktop.sendMessageViaLibsignal.prod',
+  'desktop.stickerReply.send.beta',
+  'desktop.stickerReply.send.prod',
 ] as const;
 
 export type SemverKeyType = ArrayValues<typeof SemverKeys>;
 
 const ScalarKeys = [
+  'client.maxAllowedClockSkewSeconds',
   'desktop.callQualitySurveyPPM',
   'desktop.calling.dredDuration.alpha',
   'desktop.calling.dredDuration.beta',
   'desktop.calling.dredDuration.prod',
+  'desktop.calling.enableSvc',
+  'desktop.calling.svcMode',
+  'desktop.calling.svcModeForScreenshare',
+  'desktop.calling.svcMaxBitrateBps',
   'desktop.clientExpiration',
+  'desktop.heapSizeWarning',
   'desktop.internalUser',
   'desktop.loggingErrorToasts',
   'desktop.mediaQuality.levels',
   'desktop.messageCleanup',
-  'desktop.recentGifs.allowLegacyTenorCdnUrls',
   'desktop.retryRespondMaxAge',
   'desktop.senderKey.retry',
   'desktop.senderKeyMaxAge',
   'global.adminDeleteMaxAgeInSeconds',
+  'global.attachments.maxAutoDownloadSizeBytes',
   'global.attachments.maxBytes',
   'global.attachments.maxReceiveBytes',
   'global.backups.mediaTierFallbackCdnNumber',
@@ -81,7 +91,8 @@ const ScalarKeys = [
   'global.nicknames.max',
   'global.nicknames.min',
   'global.normalDeleteMaxAgeInSeconds',
-  'global.pinned_message_limit',
+  'global.pinnedChatLimit',
+  'global.pinnedMessageLimit',
   'global.textAttachmentLimitBytes',
   'global.videoAttachments.transcodeTargetBytes',
 ] as const;
@@ -100,12 +111,16 @@ const KnownDesktopLibsignalNetKeys = [
   'desktop.libsignalNet.grpc.AccountsAnonymousLookupUsernameLink.2.beta',
   'desktop.libsignalNet.grpc.AttachmentsGetUploadForm',
   'desktop.libsignalNet.grpc.AttachmentsGetUploadForm.beta',
+  'desktop.libsignalNet.grpc.BackupsAnonymousGetUploadForm',
+  'desktop.libsignalNet.grpc.BackupsAnonymousGetUploadForm.beta',
+  'desktop.libsignalNet.grpc.KeyTransparencyQueryServiceSearchV2',
+  'desktop.libsignalNet.grpc.KeyTransparencyQueryServiceSearchV2.beta',
   'desktop.libsignalNet.grpc.MessagesAnonymousSendMultiRecipientMessage.2',
   'desktop.libsignalNet.grpc.MessagesAnonymousSendMultiRecipientMessage.2.beta',
-  'desktop.libsignalNet.useH2ForAuthChat',
-  'desktop.libsignalNet.useH2ForAuthChat.beta',
-  'desktop.libsignalNet.useH2ForUnauthChat',
-  'desktop.libsignalNet.useH2ForUnauthChat.beta',
+  'desktop.libsignalNet.grpc.MessagesAnonymousSendSingleRecipientMessage',
+  'desktop.libsignalNet.grpc.MessagesAnonymousSendSingleRecipientMessage.beta',
+  'desktop.libsignalNet.grpc.MessagesSendMessage',
+  'desktop.libsignalNet.grpc.MessagesSendMessage.beta',
 ] as const;
 
 type KnownLibsignalKeysType = StripPrefix<
@@ -135,13 +150,13 @@ type ConfigValueType = {
 export type ConfigMapType = {
   [key in ConfigKeyType]?: ConfigValueType;
 };
-export type ConfigListenerType = (value: ConfigValueType) => unknown;
-type ConfigListenersMapType = {
-  [key: string]: Array<ConfigListenerType>;
-};
+type ConfigListenerType = Readonly<{
+  keys: Set<ConfigKeyType>;
+  callback: () => unknown;
+}>;
 
 let config: ConfigMapType | undefined;
-const listeners: ConfigListenersMapType = {};
+const listeners = new Set<ConfigListenerType>();
 
 export type OptionsType = Readonly<{
   getConfig: typeof getConfig;
@@ -155,17 +170,17 @@ export function restoreRemoteConfigFromStorage({
 }
 
 export function onChange(
-  key: ConfigKeyType,
-  fn: ConfigListenerType
+  keys: Array<ConfigKeyType>,
+  callback: () => unknown
 ): () => void {
-  const keyListeners: Array<ConfigListenerType> = get(listeners, key, []);
-  keyListeners.push(fn);
-  listeners[key] = keyListeners;
+  const listener: ConfigListenerType = {
+    keys: new Set(keys),
+    callback,
+  };
+  listeners.add(listener);
 
   return () => {
-    if (listeners[key]) {
-      listeners[key] = listeners[key].filter(l => l !== fn);
-    }
+    listeners.delete(listener);
   };
 }
 
@@ -203,12 +218,19 @@ export const _refreshRemoteConfig = async ({
   // new configuration only includes enabled flags we can't distinguish betewen
   // a remote flag being deleted or being disabled. We synthesize that for our
   // known keys.
-  const newConfigValues: Map<string, string | undefined> = new Map(
+  const newConfigValues = new Map<string, string | undefined>(
     KnownConfigKeys.map(name => [name, undefined])
   );
   for (const [name, value] of newConfig) {
     newConfigValues.set(name, value);
   }
+
+  const changedKeys = new Set<string>();
+  const changeDescriptions: Array<{
+    name: string;
+    from: string;
+    to: string;
+  }> = [];
 
   const oldConfig = config;
   let semverError = false;
@@ -253,12 +275,12 @@ export const _refreshRemoteConfig = async ({
         semverError = true;
       }
 
-      // If enablement changes at all, notify listeners
-      const currentListeners = listeners[name] || [];
       if (hasChanged) {
-        log.info(`Remote Config: Flag ${name} has changed`);
-        currentListeners.forEach(listener => {
-          listener(configValue);
+        changedKeys.add(name);
+        changeDescriptions.push({
+          name,
+          from: previousValue ?? '[undefined]',
+          to: configValue.value ?? '[undefined]',
         });
       }
 
@@ -270,6 +292,29 @@ export const _refreshRemoteConfig = async ({
     },
     {}
   );
+
+  if (changedKeys.size !== 0) {
+    log.info(
+      `Remote Config: Flags ${[...changedKeys].join(', ')} have changed`
+    );
+
+    if (
+      isEnabled('desktop.loggingErrorToasts') &&
+      Object.keys(oldConfig ?? {}).length > 0
+    ) {
+      window.reduxActions.toast.showToast({
+        toastType: ToastType.RemoteConfigChanged,
+        changes: changeDescriptions,
+      });
+    }
+
+    // If enablement changes at all, notify listeners
+    for (const { keys, callback } of listeners) {
+      if (!keys.isDisjointFrom(changedKeys)) {
+        callback();
+      }
+    }
+  }
 
   if (semverError && config['desktop.internalUser']?.enabled) {
     window.reduxActions.toast.showToast({
@@ -341,6 +386,7 @@ export function getValue(
 }
 
 // See isRemoteConfigBucketEnabled in selectors/items.ts
+/** @knipignore Keep around for future features that might need it */
 export function isBucketValueEnabled(
   name: ConfigKeyType,
   e164: string | undefined,
@@ -355,7 +401,7 @@ export function isCountryPpmCsvBucketEnabled(
   e164: string | undefined,
   aci: AciString | undefined
 ): boolean {
-  if (e164 == null || aci == null) {
+  if (aci == null) {
     return false;
   }
 

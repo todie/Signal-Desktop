@@ -53,15 +53,16 @@ export type CollapseSet =
       messages: Array<CollapsedMessage>;
     };
 
-export function canCollapseForGroupSet(message: MessageType): boolean {
+function canCollapseForGroupSet(message: MessageType): boolean {
   const { type, groupV2Change } = message;
 
   if (
-    type === 'keychange' ||
-    type === 'profile-change' ||
-    type === 'poll-terminate' ||
     type === 'change-number-notification' ||
-    type === 'pinned-message-notification'
+    type === 'keychange' ||
+    type === 'pinned-message-notification' ||
+    type === 'poll-terminate' ||
+    type === 'profile-change' ||
+    type === 'verified-change'
   ) {
     return true;
   }
@@ -76,7 +77,7 @@ export function canCollapseForGroupSet(message: MessageType): boolean {
   return false;
 }
 
-export function canCollapseForTimerSet(message: MessageType): boolean {
+function canCollapseForTimerSet(message: MessageType): boolean {
   if (message.type === 'timer-notification') {
     return true;
   }
@@ -89,7 +90,7 @@ export function canCollapseForTimerSet(message: MessageType): boolean {
   return false;
 }
 
-export function canCollapseForCallSet(
+function canCollapseForCallSet(
   message: MessageType,
   options: {
     activeCall: CallStateType | undefined;
@@ -416,7 +417,7 @@ export function mapItemsIntoCollapseSets({
       strictAssert(
         lastCollapseSet.type !== 'group-updates' &&
           lastCollapseSet.type !== 'timer-changes',
-        'Should never have two matching timer items, but be in a group or timer set'
+        'Should never have two matching call items, but be in a group or timer set'
       );
 
       if (lastCollapseSet.type === 'call-events') {
@@ -490,7 +491,7 @@ export function mapItemsIntoCollapseSets({
 // In the case where an existing multiday set extends into the current day, and we then
 // discover that the set is ending in the middle of the current day, we need to split
 // lastCollapseSet into everything before today, and everything from today.
-export function maybeSplitLastCollapseSet({
+function maybeSplitLastCollapseSet({
   atDateBoundary,
   currentDayFirstId,
   haveCompleteDay,

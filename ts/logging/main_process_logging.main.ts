@@ -49,7 +49,7 @@ export async function initialize(
       if (level >= LogLevel.Error) {
         getMainWindow()?.webContents.send(
           'logging-error',
-          `${msgPrefix ? `${msgPrefix}` : ''}${logLine}`
+          `${msgPrefix ?? ''}${logLine}`
         );
       }
     });
@@ -299,7 +299,7 @@ export function fetchLogs(logPath: string): Promise<Array<LogEntryType>> {
   });
 }
 
-export const fetchAdditionalLogData = (
+const fetchAdditionalLogData = (
   mainWindow: BrowserWindow
 ): Promise<Omit<FetchLogIpcData, 'logEntries'>> =>
   new Promise(resolve => {

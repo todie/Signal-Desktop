@@ -1,7 +1,8 @@
 // Copyright 2022 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import React from 'react';
+import type { JSX } from 'react';
+
 import type { LocalizerType } from '../types/Util.std.ts';
 import type { PreferredBadgeSelectorType } from '../state/selectors/badges.preload.ts';
 import type {
@@ -82,7 +83,7 @@ export function StoryDetailsModal({
   sendState,
   timestamp,
   expirationTimestamp,
-}: PropsType): React.JSX.Element {
+}: PropsType): JSX.Element {
   // the sender is included in the sendState data
   // but we don't want to show the sender in the "Sent To" list
   const actualRecipientsSendState = sendState?.filter(
@@ -93,7 +94,7 @@ export function StoryDetailsModal({
     ? groupBy(actualRecipientsSendState, contact => contact.status)
     : undefined;
 
-  let content: React.JSX.Element;
+  let content: JSX.Element;
   if (contactsBySendStatus) {
     content = (
       <div className="StoryDetailsModal__contact-container">
@@ -199,7 +200,8 @@ export function StoryDetailsModal({
   }
 
   const timeRemaining = expirationTimestamp
-    ? DurationInSeconds.fromMillis(expirationTimestamp - Date.now())
+    ? // oxlint-disable-next-line react/purity
+      DurationInSeconds.fromMillis(expirationTimestamp - Date.now())
     : undefined;
 
   const menuOptions = [

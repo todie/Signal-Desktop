@@ -77,18 +77,24 @@ describe('safety number', function (this: Mocha.Suite) {
     await bootstrap.teardown();
   });
 
-  async function changeIdentityKey(): Promise<void> {
-    const { phone, contacts } = bootstrap;
-    const [alice, bob] = contacts as [PrimaryDevice, PrimaryDevice];
+  async function changeIdentityKey(): Promise<PrimaryDevice> {
+    const { contacts, phone, server } = bootstrap;
+    const [alice] = contacts as [PrimaryDevice];
 
     await app.waitForStorageService();
 
-    debug('change public key in storage service');
+    debug('reregistering contact');
+    const newAlicePrimary = await server.reregisterPrimaryDevice({
+      aci: alice.device.aci,
+      profileName: 'Updated Profile Name',
+    });
+
+    debug('updating public key in storage service');
     let state = await phone.expectStorageState('after link');
 
-    // Break identity key
+    // Update identity key
     state = state.updateContact(alice, {
-      identityKey: bob.publicKey.serialize(),
+      identityKey: newAlicePrimary.publicKey.serialize(),
     });
 
     await phone.setStorageState(state);
@@ -97,6 +103,8 @@ describe('safety number', function (this: Mocha.Suite) {
     });
 
     await app.waitForStorageService();
+
+    return newAlicePrimary;
   }
 
   it('show safety number change UI on regular send', async () => {
@@ -110,31 +118,29 @@ describe('safety number', function (this: Mocha.Suite) {
     const input = await waitForEnabledComposer(window);
     await typeIntoInput(input, 'Hello Alice!', '');
 
-    await changeIdentityKey();
+    const newAlicePrimary = await changeIdentityKey();
 
     await expectSystemMessages(window, [
-      /Safety Number has changed/, // Bob's key from storage service
+      // Alice's updated key via storage service, leading to profile fetch
+      /Safety Number with Alice/,
     ]);
 
     debug('Sending message');
     await input.press('Enter');
 
     debug('Waiting for safety number dialog');
-    const dialog = window.locator(
-      '[data-testid="ConfirmationDialog.SafetyNumberChangeDialog.reviewing"]'
-    );
-    await dialog.locator(`"${alice.profileName}"`).waitFor();
+    const dialog = window.getByRole('alertdialog', {
+      name: 'Safety Number Changes',
+    });
 
-    await expectSystemMessages(window, [
-      /Safety Number has changed/, // Bob's key from storage service
-      /Safety Number has changed/, // Fixed Alice's key from backend
-    ]);
+    debug(`Checking for alice in dialog: ${alice.profileName}`);
+    await dialog.locator(`"${alice.profileName}"`).waitFor();
 
     debug('Confirming send');
     await dialog.getByRole('button', { name: 'Send anyway' }).click();
 
     debug('Getting a message');
-    const { body } = await alice.waitForMessage();
+    const { body } = await newAlicePrimary.waitForMessage();
     assert.strictEqual(body, 'Hello Alice!');
   });
 
@@ -175,22 +181,22 @@ describe('safety number', function (this: Mocha.Suite) {
       .locator('.SendStoryModal__distribution-list__name >> "My Story"')
       .click();
 
-    await changeIdentityKey();
+    const newAlicePrimary = await changeIdentityKey();
 
     debug('Hitting Send');
     await window.locator('button.SendStoryModal__send').click();
 
     debug('Waiting for safety number dialog');
-    const dialog = window.locator(
-      '[data-testid="ConfirmationDialog.SafetyNumberChangeDialog.reviewing"]'
-    );
+    const dialog = window.getByRole('alertdialog', {
+      name: 'Safety Number Changes',
+    });
     await dialog.locator(`"${alice.profileName}"`).waitFor();
 
     debug('Confirming send');
     await dialog.getByRole('button', { name: 'Send anyway' }).click();
 
     debug('Getting a story');
-    const { storyMessage } = await alice.waitForStory();
+    const { storyMessage } = await newAlicePrimary.waitForStory();
     assert.ok(storyMessage.attachment?.textAttachment != null);
     assert.strictEqual(storyMessage.attachment.textAttachment.text, '123');
   });

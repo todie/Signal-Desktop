@@ -121,6 +121,7 @@ function validateIdentityKey(attrs: unknown): attrs is IdentityKeyType {
  */
 function formatKeys(keys: Array<number>): string {
   return formatGroups(
+    // oxlint-disable-next-line typescript/require-array-sort-compare
     groupWhile(keys.sort(), (a, b) => a + 1 === b).slice(0, 10),
     '-',
     ', ',
@@ -190,18 +191,15 @@ async function _fillCaches<ID, T extends HasIdType<ID>, HydratedType>(
   object[field] = cache as any;
 }
 
-export function hydrateSession(session: SessionType): SessionRecord {
+function hydrateSession(session: SessionType): SessionRecord {
   return SessionRecord.deserialize(session.record);
 }
-export function hydratePublicKey(identityKey: IdentityKeyType): PublicKey {
-  return PublicKey.deserialize(identityKey.publicKey);
-}
-export function hydratePreKey(preKey: PreKeyType): PreKeyRecord {
+function hydratePreKey(preKey: PreKeyType): PreKeyRecord {
   const publicKey = PublicKey.deserialize(preKey.publicKey);
   const privateKey = PrivateKey.deserialize(preKey.privateKey);
   return PreKeyRecord.new(preKey.keyId, publicKey, privateKey);
 }
-export function hydrateSignedPreKey(
+function hydrateSignedPreKey(
   signedPreKey: SignedPreKeyType
 ): SignedPreKeyRecord {
   const createdAt = signedPreKey.created_at;
@@ -236,7 +234,7 @@ type SenderKeyCacheEntry = CacheEntryType<SenderKeyType, SenderKeyRecord>;
 
 type ZoneQueueEntryType = Readonly<{
   zone: Zone;
-  callback(): void;
+  callback: () => void;
 }>;
 
 export class SignalProtocolStore extends EventEmitter {
@@ -246,9 +244,9 @@ export class SignalProtocolStore extends EventEmitter {
 
   // Cached values
 
-  #ourIdentityKeys = new Map<ServiceIdString, KeyPairType>();
+  readonly #ourIdentityKeys = new Map<ServiceIdString, KeyPairType>();
 
-  #ourRegistrationIds = new Map<ServiceIdString, number>();
+  readonly #ourRegistrationIds = new Map<ServiceIdString, number>();
   #cachedPniSignatureMessage: PniSignatureMessageType | undefined;
 
   identityKeys?: Map<
@@ -927,7 +925,6 @@ export class SignalProtocolStore extends EventEmitter {
     return new PQueue({
       concurrency: 1,
       timeout: MINUTE * 30,
-      throwOnTimeout: true,
     });
   }
 
@@ -1096,7 +1093,6 @@ export class SignalProtocolStore extends EventEmitter {
     return new PQueue({
       concurrency: 1,
       timeout: MINUTE * 30,
-      throwOnTimeout: true,
     });
   }
 
@@ -1117,7 +1113,6 @@ export class SignalProtocolStore extends EventEmitter {
     return new PQueue({
       concurrency: 1,
       timeout: MINUTE * 30,
-      throwOnTimeout: true,
     });
   }
 
@@ -2697,7 +2692,7 @@ export class SignalProtocolStore extends EventEmitter {
     this.emit('removeAllData');
   }
 
-  async removeAllConfiguration(): Promise<void> {
+  async removeAllConfiguration(isPrimary: boolean): Promise<void> {
     // Conversations. These properties are not present in redux.
     window.ConversationController.getAll().forEach(conversation => {
       conversation.set({
@@ -2708,7 +2703,7 @@ export class SignalProtocolStore extends EventEmitter {
       });
     });
 
-    await DataWriter.removeAllConfiguration();
+    await DataWriter.removeAllConfiguration(isPrimary);
 
     await this.hydrateCaches();
 
@@ -2718,7 +2713,7 @@ export class SignalProtocolStore extends EventEmitter {
 
   signAlternateIdentity(): PniSignatureMessageType | undefined {
     const ourAci = itemStorage.user.getCheckedAci();
-    const ourPni = itemStorage.user.getPni();
+    const ourPni = itemStorage.user.getOptionalPni();
     if (!ourPni) {
       log.error('signAlternateIdentity: No local pni');
       return undefined;

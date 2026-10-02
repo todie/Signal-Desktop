@@ -15,6 +15,8 @@ import {
   STRING_BYTE_LIMIT,
   STRING_GRAPHEME_LIMIT,
 } from '../types/GroupMemberLabels.std.ts';
+import { isConversationAccepted } from './isConversationAccepted.preload.ts';
+import type { Emoji } from '../axo/emoji.std.ts';
 
 export function isMemberPending(
   conversationAttrs: Pick<
@@ -182,7 +184,7 @@ export function getMemberships(
 ): ReadonlyArray<{
   aci: AciString;
   isAdmin: boolean;
-  labelEmoji: string | undefined;
+  labelEmoji: Emoji.Variant | undefined;
   labelString: string | undefined;
 }> {
   if (!isGroupV2(conversationAttrs)) {
@@ -193,13 +195,18 @@ export function getMemberships(
   return members.map(member => ({
     isAdmin: member.role === Proto.Member.Role.ADMINISTRATOR,
     aci: member.aci,
-    labelEmoji: member.labelEmoji,
-    labelString: member.labelString
-      ? truncateString(member.labelString.trim(), {
-          byteLimit: STRING_BYTE_LIMIT,
-          graphemeLimit: STRING_GRAPHEME_LIMIT,
-        })
-      : undefined,
+    ...(isConversationAccepted(conversationAttrs) ||
+    member.aci === itemStorage.user.getCheckedAci()
+      ? {
+          labelEmoji: member.labelEmoji,
+          labelString: member.labelString
+            ? truncateString(member.labelString.trim(), {
+                byteLimit: STRING_BYTE_LIMIT,
+                graphemeLimit: STRING_GRAPHEME_LIMIT,
+              })
+            : undefined,
+        }
+      : { labelEmoji: undefined, labelString: undefined }),
   }));
 }
 
@@ -210,7 +217,7 @@ export function areWePending(
   >
 ): boolean {
   const ourAci = itemStorage.user.getAci();
-  const ourPni = itemStorage.user.getPni();
+  const ourPni = itemStorage.user.getOptionalPni();
   return Boolean(
     ourAci &&
     (isMemberPending(conversationAttrs, ourAci) ||

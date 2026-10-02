@@ -1,22 +1,28 @@
 // Copyright 2024 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import React, { StrictMode, useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSelector } from 'react-redux';
 
 import type { AudioDevice } from '@signalapp/ringrtc';
-import type { MutableRefObject } from 'react';
+import type { MutableRefObject, JSX } from 'react';
 
 import { useItemsActions } from '../ducks/items.preload.ts';
 import { useConversationsActions } from '../ducks/conversations.preload.ts';
 import {
+  getConversationSelector,
   getConversationsWithCustomColorSelector,
   getMe,
-  getOtherTabsUnreadStats,
+  getOtherTabsUnreadCount,
 } from '../selectors/conversations.dom.ts';
 import {
   getBackupKey,
   getCustomColors,
+  getGlobalNotifyWhileMuted,
+  getGlobalShowUnreadReminders,
+  getHasRegistrationLock,
+  getHasSvrPin,
+  getIsSvrPinPending,
   getItems,
   getNavTabsCollapsed,
   getPreferredLeftPaneWidth,
@@ -30,16 +36,16 @@ import {
   setPhoneNumberDiscoverability,
 } from '../../textsecure/WebAPI.preload.ts';
 import { DEFAULT_CONVERSATION_COLOR } from '../../types/Colors.std.ts';
+import { SIGNAL_ACI } from '../../types/SignalConversation.std.ts';
 import { saveAttachmentToDisk } from '../../util/migrations.preload.ts';
 import { format } from '../../types/PhoneNumber.std.ts';
 import {
+  getAreWePrimaryDevice,
   getIntl,
   getTheme,
   getUser,
-  getUserDeviceId,
   getUserNumber,
 } from '../selectors/user.std.ts';
-import { EmojiSkinTone } from '../../components/fun/data/emojis.std.ts';
 import { renderClearingDataView } from '../../shims/renderClearingDataView.preload.tsx';
 import OS from '../../util/os/osPreload.preload.ts';
 import { themeChanged } from '../../shims/themeChanged.dom.ts';
@@ -83,14 +89,12 @@ import { deleteAllMyStories } from '../../util/deleteAllMyStories.preload.ts';
 import { SmartPreferencesDonations } from './PreferencesDonations.preload.tsx';
 import { useDonationsActions } from '../ducks/donations.preload.ts';
 import { generateDonationReceiptBlob } from '../../util/generateDonationReceipt.dom.ts';
-import { getProfiles } from '../selectors/notificationProfiles.dom.ts';
 import { backupLevelFromNumber } from '../../services/backups/types.std.ts';
 import { getMessageQueueTime } from '../../util/getMessageQueueTime.dom.ts';
 import { useBackupActions } from '../ducks/backups.preload.ts';
 import { isFeaturedEnabledSelector } from '../../util/isFeatureEnabled.dom.ts';
 import { SmartPreferencesChatFoldersPage } from './PreferencesChatFoldersPage.preload.tsx';
 import { SmartPreferencesEditChatFolderPage } from './PreferencesEditChatFolderPage.preload.tsx';
-import { AxoProvider } from '../../axo/AxoProvider.dom.tsx';
 import {
   getCurrentChatFoldersCount,
   getHasAnyCurrentCustomChatFolders,
@@ -99,64 +103,77 @@ import {
   SmartNotificationProfilesCreateFlow,
   SmartNotificationProfilesHome,
 } from './PreferencesNotificationProfiles.preload.tsx';
-
-import type { SettingsLocation } from '../../types/Nav.std.ts';
-import type { StorageAccessType } from '../../types/Storage.d.ts';
-import type { ThemeType } from '../../util/preload.preload.ts';
-import type { WidthBreakpoint } from '../../components/_util.std.ts';
+import { isLocalBackupsEnabled } from '../../util/isLocalBackupsEnabled.dom.ts';
+import { getBackupKeyHash } from '../../services/backups/crypto.preload.ts';
+import { Emoji } from '../../axo/emoji.std.ts';
+import { AppProvider } from '../../windows/AppProvider.dom.tsx';
+import { useMegaphonesActions } from '../ducks/megaphones.preload.ts';
 import { DialogType } from '../../types/Dialogs.std.ts';
 import { promptOSAuth } from '../../util/promptOSAuth.preload.ts';
-import type { StateType } from '../reducer.preload.ts';
 import {
   pauseBackupMediaDownload,
   resumeBackupMediaDownload,
   cancelBackupMediaDownload,
 } from '../../util/backupMediaDownload.preload.ts';
+
+import type { SettingsLocation } from '../../types/Nav.std.ts';
+import type { StorageAccessType } from '../../types/Storage.d.ts';
+import type { NotifyWhileMutedKey } from '../../util/notifyWhileMuted.std.ts';
+import { NOTIFY_WHILE_MUTED_FIELDS } from '../../util/notifyWhileMuted.std.ts';
+import type { ThemeType } from '../../util/preload.preload.ts';
+import type { WidthBreakpoint } from '../../components/_util.std.ts';
+import type { StateType } from '../reducer.preload.ts';
 import { DonationsErrorBoundary } from '../../components/DonationsErrorBoundary.dom.tsx';
 import type { SmartPreferencesChatFoldersPageProps } from './PreferencesChatFoldersPage.preload.tsx';
 import type { SmartPreferencesEditChatFolderPageProps } from './PreferencesEditChatFolderPage.preload.tsx';
 import type { ExternalProps as SmartNotificationProfilesProps } from './PreferencesNotificationProfiles.preload.tsx';
-import { useMegaphonesActions } from '../ducks/megaphones.preload.ts';
-import type { ZoomFactorType } from '../../types/StorageKeys.std.ts';
-import { isLocalBackupsEnabled } from '../../util/isLocalBackupsEnabled.preload.ts';
-import { getBackupKeyHash } from '../../services/backups/crypto.preload.ts';
+import {
+  STORAGE_KEY_DEFAULTS,
+  type ZoomFactorType,
+} from '../../types/StorageKeys.std.ts';
+import type { BlockedConversation } from '../../components/Preferences.dom.tsx';
+import { pinReminderService } from '../../services/pinReminder.preload.ts';
+import { useGlobalModalActions } from '../ducks/globalModals.preload.ts';
+import { maybeUpdateRegistrationLock } from '../../util/registrationLock.preload.ts';
+import { disableSignalPin } from '../../util/disableSignalPin.preload.ts';
 
-const DEFAULT_NOTIFICATION_SETTING = 'message';
+const RESETTABLE_GLOBAL_NOTIFICATION_ITEMS = [
+  ...Object.values(NOTIFY_WHILE_MUTED_FIELDS),
+  'showUnreadReminders',
+] as const;
 
 function renderUpdateDialog(
   props: Readonly<{ containerWidthBreakpoint: WidthBreakpoint }>
-): React.JSX.Element {
+): JSX.Element {
   return <SmartUpdateDialog {...props} disableDismiss />;
 }
 
 function renderPreferencesChatFoldersPage(
   props: SmartPreferencesChatFoldersPageProps
-): React.JSX.Element {
+): JSX.Element {
   return <SmartPreferencesChatFoldersPage {...props} />;
 }
 
 function renderPreferencesEditChatFolderPage(
   props: SmartPreferencesEditChatFolderPageProps
-): React.JSX.Element {
+): JSX.Element {
   return <SmartPreferencesEditChatFolderPage {...props} />;
 }
 
 function renderNotificationProfilesHome(
   props: SmartNotificationProfilesProps
-): React.JSX.Element {
+): JSX.Element {
   return <SmartNotificationProfilesHome {...props} />;
 }
 
 function renderNotificationProfilesCreateFlow(
   props: SmartNotificationProfilesProps
-): React.JSX.Element {
+): JSX.Element {
   return <SmartNotificationProfilesCreateFlow {...props} />;
 }
 
-function renderProfileEditor(options: {
-  contentsRef: MutableRefObject<HTMLDivElement | null>;
-}): React.JSX.Element {
-  return <SmartProfileEditor contentsRef={options.contentsRef} />;
+function renderProfileEditor(): JSX.Element {
+  return <SmartProfileEditor />;
 }
 
 function renderDonationsPane({
@@ -167,7 +184,7 @@ function renderDonationsPane({
   contentsRef: MutableRefObject<HTMLDivElement | null>;
   settingsLocation: SettingsLocation;
   setSettingsLocation: (settingsLocation: SettingsLocation) => void;
-}): React.JSX.Element {
+}): JSX.Element {
   return (
     <DonationsErrorBoundary>
       <SmartPreferencesDonations
@@ -210,7 +227,7 @@ async function forceKeyTransparencyCheck(): Promise<void> {
   await keyTransparency.selfCheck();
 }
 
-export function SmartPreferences(): React.JSX.Element | null {
+export function SmartPreferences(): JSX.Element | null {
   const {
     addCustomColor,
     editCustomColor,
@@ -222,14 +239,18 @@ export function SmartPreferences(): React.JSX.Element | null {
     setGlobalDefaultConversationColor,
     toggleNavTabsCollapse,
   } = useItemsActions();
-  const { removeCustomColorOnConversations, resetAllChatColors } =
-    useConversationsActions();
+  const {
+    removeCustomColorOnConversations,
+    resetAllChatColors,
+    resetAllNotificationSettings: resetAllPerChatNotificationSettings,
+  } = useConversationsActions();
   const { startUpdate } = useUpdatesActions();
   const { changeLocation } = useNavActions();
   const { showToast, openFileInFolder } = useToastActions();
   const { internalAddDonationReceipt } = useDonationsActions();
   const { startPlaintextExport, startLocalBackupExport } = useBackupActions();
   const { addVisibleMegaphone } = useMegaphonesActions();
+  const { showPinChangeModal } = useGlobalModalActions();
 
   // Selectors
 
@@ -244,14 +265,15 @@ export function SmartPreferences(): React.JSX.Element | null {
   const hasFailedStorySends = useSelector(getHasAnyFailedStorySends);
   const me = useSelector(getMe);
   const navTabsCollapsed = useSelector(getNavTabsCollapsed);
-  const otherTabsUnreadStats = useSelector(getOtherTabsUnreadStats);
+  const otherTabsUnreadCount = useSelector(getOtherTabsUnreadCount);
   const preferredWidthFromStorage = useSelector(getPreferredLeftPaneWidth);
   const getPreferredBadge = useSelector(getPreferredBadgeSelector);
   const theme = useSelector(getTheme);
   const donationReceipts = useSelector(
     (state: StateType) => state.donations.receipts
   );
-  const notificationProfileCount = useSelector(getProfiles).length;
+  const weArePrimaryDevice = useSelector(getAreWePrimaryDevice);
+  const conversationSelector = useSelector(getConversationSelector);
 
   const shouldShowUpdateDialog = dialogType !== DialogType.None;
   const badge = getPreferredBadge(me.badges);
@@ -272,6 +294,12 @@ export function SmartPreferences(): React.JSX.Element | null {
   // The weird ones
 
   const makeSyncRequest = async () => {
+    if (weArePrimaryDevice) {
+      throw new Error(
+        'Preferences/makeSyncRequest: We are primary device; no sync requests!'
+      );
+    }
+
     const contactSyncComplete = waitForEvent('contactSync:complete');
     return Promise.all([sendSyncRequests(), contactSyncComplete]);
   };
@@ -328,10 +356,9 @@ export function SmartPreferences(): React.JSX.Element | null {
   // Textsecure - user can change number and change this device's name
 
   const phoneNumber = format(useSelector(getUserNumber) ?? '', {});
-  const isPrimary = useSelector(getUserDeviceId) === 1;
-  const isSyncSupported = !isPrimary;
+  const isSyncSupported = !weArePrimaryDevice;
 
-  const [deviceName, setDeviceName] = React.useState(
+  const [deviceName, setDeviceName] = useState(
     itemStorage.user.getDeviceName()
   );
   useEffect(() => {
@@ -355,13 +382,13 @@ export function SmartPreferences(): React.JSX.Element | null {
   // RingRTC - the list of devices is unchanging while settings window is open
 
   // The select boxes for devices are disabled while these arrays have zero length
-  const [availableCameras, setAvailableCameras] = React.useState<
+  const [availableCameras, setAvailableCameras] = useState<
     Array<MediaDeviceInfo>
   >([]);
-  const [availableMicrophones, setAvailableMicrophones] = React.useState<
+  const [availableMicrophones, setAvailableMicrophones] = useState<
     Array<AudioDevice>
   >([]);
-  const [availableSpeakers, setAvailableSpeakers] = React.useState<
+  const [availableSpeakers, setAvailableSpeakers] = useState<
     Array<AudioDevice>
   >([]);
 
@@ -390,13 +417,12 @@ export function SmartPreferences(): React.JSX.Element | null {
 
   // Ephemeral settings, via async IPC, all can be modiified
 
-  const [localeOverride, setLocaleOverride] = React.useState<string | null>();
+  const [localeOverride, setLocaleOverride] = useState<string | null>();
   const [systemTraySettings, setSystemTraySettings] =
-    React.useState<SystemTraySetting>();
-  const [hasContentProtection, setContentProtection] =
-    React.useState<boolean>();
-  const [hasSpellCheck, setSpellCheck] = React.useState<boolean>();
-  const [themeSetting, setThemeSetting] = React.useState<ThemeType>();
+    useState<SystemTraySetting>();
+  const [hasContentProtection, setContentProtection] = useState<boolean>();
+  const [hasSpellCheck, setSpellCheck] = useState<boolean>();
+  const [themeSetting, setThemeSetting] = useState<ThemeType>();
 
   useEffect(() => {
     let canceled = false;
@@ -486,11 +512,11 @@ export function SmartPreferences(): React.JSX.Element | null {
 
   // Async IPC for electron configuration, all can be modified
 
-  const [hasAutoLaunch, setAutoLaunch] = React.useState<boolean>();
+  const [hasAutoLaunch, setAutoLaunch] = useState<boolean>();
   const [hasMediaCameraPermissions, setMediaCameraPermissions] =
-    React.useState<boolean>();
-  const [hasMediaPermissions, setMediaPermissions] = React.useState<boolean>();
-  const [zoomFactor, setZoomFactor] = React.useState<ZoomFactorType>();
+    useState<boolean>();
+  const [hasMediaPermissions, setMediaPermissions] = useState<boolean>();
+  const [zoomFactor, setZoomFactor] = useState<ZoomFactorType>();
 
   useEffect(() => {
     let canceled = false;
@@ -581,13 +607,50 @@ export function SmartPreferences(): React.JSX.Element | null {
   } = items;
   const defaultConversationColor =
     items.defaultConversationColor || DEFAULT_CONVERSATION_COLOR;
-  const hasLinkPreviews = items.linkPreviews ?? false;
-  const hasReadReceipts = items['read-receipt-setting'] ?? false;
-  const hasTypingIndicators = items.typingIndicators ?? false;
-  const blockedCount =
-    (items['blocked-groups']?.length ?? 0) +
-    (items['blocked-uuids']?.length ?? 0);
-  const emojiSkinToneDefault = items.emojiSkinToneDefault ?? EmojiSkinTone.None;
+
+  const blockedContacts: Array<BlockedConversation> = useMemo(() => {
+    const result = new Map<string, BlockedConversation>();
+
+    (items['blocked-uuids'] ?? []).forEach(item => {
+      const conversation = conversationSelector(item.serviceId);
+      result.set(conversation.id, {
+        conversation,
+        blockedAt: item.blockedAt,
+      });
+    });
+    (items.blocked ?? []).forEach(item => {
+      const conversation = conversationSelector(item.e164);
+      if (!result.has(conversation.id)) {
+        result.set(conversation.id, {
+          conversation,
+          blockedAt: item.blockedAt,
+        });
+      }
+    });
+
+    if (items.releaseNotesChatBlocked) {
+      const conversation = conversationSelector(SIGNAL_ACI);
+      result.set(conversation.id, {
+        conversation,
+        blockedAt: undefined /* TODO */,
+      });
+    }
+
+    return Array.from(result.values());
+  }, [items, conversationSelector]);
+  const blockedGroups: Array<BlockedConversation> = useMemo(() => {
+    const result: Array<BlockedConversation> = [];
+    (items['blocked-groups'] ?? []).forEach(item => {
+      result.push({
+        conversation: conversationSelector(item.groupId),
+        blockedAt: item.blockedAt,
+      });
+    });
+    return result;
+  }, [items, conversationSelector]);
+
+  const emojiSkinToneDefault =
+    items.emojiSkinToneDefault ?? Emoji.SkinTone.None;
   const isInternalUser =
     items.remoteConfig?.['desktop.internalUser']?.enabled ?? false;
   const isContentProtectionSupported =
@@ -599,13 +662,6 @@ export function SmartPreferences(): React.JSX.Element | null {
     remoteConfig: items.remoteConfig,
   });
   const backupFreeMediaDays = getMessageQueueTime(items.remoteConfig) / DAY;
-
-  const isPlaintextExportEnabled = isFeaturedEnabledSelector({
-    betaKey: 'desktop.plaintextExport.beta',
-    currentVersion: version,
-    remoteConfig: items.remoteConfig,
-    prodKey: 'desktop.plaintextExport.prod',
-  });
 
   const isKeyTransparencyAvailable = isFeaturedEnabledSelector({
     betaKey: 'desktop.keyTransparency.beta',
@@ -631,6 +687,43 @@ export function SmartPreferences(): React.JSX.Element | null {
     return [value, setter];
   }
 
+  const [hasLinkPreviews, onLinkPreviewsChange] = createItemsAccess(
+    'linkPreviews',
+    false,
+    () => {
+      const account = window.ConversationController.getOurConversationOrThrow();
+      account.captureChange('linkPreviews');
+    }
+  );
+  const [hasPreferContactAvatars, onPreferContactAvatarsChange] =
+    createItemsAccess('preferContactAvatars', false, () => {
+      const account = window.ConversationController.getOurConversationOrThrow();
+      account.captureChange('preferContactAvatars');
+      drop(window.ConversationController.rerenderAfterAvatarChange());
+    });
+
+  const [hasReadReceipts, onReadReceiptsChange] = createItemsAccess(
+    'read-receipt-setting',
+    false,
+    () => {
+      const account = window.ConversationController.getOurConversationOrThrow();
+      account.captureChange('read-receipt-setting');
+    }
+  );
+  const [hasTypingIndicators, onTypingIndicatorsChange] = createItemsAccess(
+    'typingIndicators',
+    false,
+    () => {
+      const account = window.ConversationController.getOurConversationOrThrow();
+      account.captureChange('typingIndicators');
+    }
+  );
+  const [hasSealedSenderIndicators, onSealedSenderIndicatorsChange] =
+    createItemsAccess('sealedSenderIndicators', false, () => {
+      const account = window.ConversationController.getOurConversationOrThrow();
+      account.captureChange('sealedSenderIndicators');
+    });
+
   const [autoDownloadAttachment, onAutoDownloadAttachmentChange] =
     createItemsAccess(
       'auto-download-attachment',
@@ -642,12 +735,13 @@ export function SmartPreferences(): React.JSX.Element | null {
 
   const [hasAudioNotifications, onAudioNotificationsChange] = createItemsAccess(
     'audio-notification',
-    false
+    STORAGE_KEY_DEFAULTS['audio-notification']
   );
   const [hasAutoConvertEmoji, onAutoConvertEmojiChange] = createItemsAccess(
     'autoConvertEmoji',
     true
   );
+
   const [hasKeepMutedChatsArchived, onKeepMutedChatsArchivedChange] =
     createItemsAccess('keepMutedChatsArchived', false, () => {
       const account = window.ConversationController.getOurConversationOrThrow();
@@ -657,18 +751,32 @@ export function SmartPreferences(): React.JSX.Element | null {
     'auto-download-update',
     true
   );
-  const [hasCallNotifications, onCallNotificationsChange] = createItemsAccess(
-    'call-system-notification',
-    true
-  );
   const [hasIncomingCallNotifications, onIncomingCallNotificationsChange] =
     createItemsAccess('incoming-call-notification', true);
   const [hasCallRingtoneNotification, onCallRingtoneNotificationChange] =
     createItemsAccess('call-ringtone-notification', true);
   const [hasCountMutedConversations, onCountMutedConversationsChange] =
-    createItemsAccess('badge-count-muted-conversations', false, () => {
-      window.Whisper.events.emit('updateUnreadCount');
-    });
+    createItemsAccess(
+      'badge-count-muted-conversations',
+      STORAGE_KEY_DEFAULTS['badge-count-muted-conversations'],
+      () => {
+        window.Whisper.events.emit('updateUnreadCount');
+        const account =
+          window.ConversationController.getOurConversationOrThrow();
+        account.captureChange('badge-count-muted-conversations');
+      }
+    );
+  const [unreadCountBadgeType, onUnreadCountBadgeTypeChange] =
+    createItemsAccess(
+      'unreadCountBadgeType',
+      STORAGE_KEY_DEFAULTS.unreadCountBadgeType,
+      () => {
+        const account =
+          window.ConversationController.getOurConversationOrThrow();
+        account.captureChange('unreadCountBadgeType');
+        window.Whisper.events.emit('updateUnreadCount');
+      }
+    );
   const [hasHideMenuBar, onHideMenuBarChange] = createItemsAccess(
     'hide-menu-bar',
     false,
@@ -679,27 +787,103 @@ export function SmartPreferences(): React.JSX.Element | null {
   );
   const [hasMessageAudio, onMessageAudioChange] = createItemsAccess(
     'audioMessage',
-    false
+    STORAGE_KEY_DEFAULTS.audioMessage
   );
   const [hasNotificationAttention, onNotificationAttentionChange] =
-    createItemsAccess('notification-draw-attention', false);
+    createItemsAccess(
+      'notification-draw-attention',
+      STORAGE_KEY_DEFAULTS['notification-draw-attention']
+    );
+  const [hasReactionNotifications, onReactionNotificationsChange] =
+    createItemsAccess(
+      'reaction-notification',
+      STORAGE_KEY_DEFAULTS['reaction-notification'],
+      () => {
+        const account =
+          window.ConversationController.getOurConversationOrThrow();
+        account.captureChange('reaction-notification');
+      }
+    );
 
   const [notificationContent, onNotificationContentChange] = createItemsAccess(
     'notification-setting',
-    'message'
+    STORAGE_KEY_DEFAULTS['notification-setting']
   );
   const hasNotifications = notificationContent !== 'off';
   const onNotificationsChange = (value: boolean) => {
     putItem(
       'notification-setting',
-      value ? DEFAULT_NOTIFICATION_SETTING : 'off'
+      value ? STORAGE_KEY_DEFAULTS['notification-setting'] : 'off'
     );
   };
+
+  const notifyWhileMuted = useSelector(getGlobalNotifyWhileMuted);
+  const onNotifyWhileMutedChange = (
+    key: NotifyWhileMutedKey,
+    value: boolean
+  ) => {
+    const itemKey = NOTIFY_WHILE_MUTED_FIELDS[key];
+    putItem(itemKey, value);
+    const account = window.ConversationController.getOurConversationOrThrow();
+    account.captureChange(itemKey);
+  };
+
+  const hasUnreadReminders = useSelector(getGlobalShowUnreadReminders);
+  const onUnreadRemindersChange = (value: boolean) => {
+    putItem('showUnreadReminders', value);
+    const account = window.ConversationController.getOurConversationOrThrow();
+    account.captureChange('showUnreadReminders');
+  };
+
+  const onResetNotificationSettings = () => {
+    // Reset global settings
+    onNotificationContentChange(STORAGE_KEY_DEFAULTS['notification-setting']);
+    onReactionNotificationsChange(
+      STORAGE_KEY_DEFAULTS['reaction-notification']
+    );
+    onNotificationAttentionChange(
+      STORAGE_KEY_DEFAULTS['notification-draw-attention']
+    );
+    onAudioNotificationsChange(STORAGE_KEY_DEFAULTS['audio-notification']);
+    onMessageAudioChange(STORAGE_KEY_DEFAULTS.audioMessage);
+    onUnreadCountBadgeTypeChange(STORAGE_KEY_DEFAULTS.unreadCountBadgeType);
+    onCountMutedConversationsChange(
+      STORAGE_KEY_DEFAULTS['badge-count-muted-conversations']
+    );
+
+    const account = window.ConversationController.getOurConversationOrThrow();
+    for (const itemKey of RESETTABLE_GLOBAL_NOTIFICATION_ITEMS) {
+      if (itemStorage.get(itemKey) === STORAGE_KEY_DEFAULTS[itemKey]) {
+        continue;
+      }
+      drop(itemStorage.put(itemKey, STORAGE_KEY_DEFAULTS[itemKey]));
+      account.captureChange(itemKey);
+    }
+
+    // Reset per-chat settings
+    resetAllPerChatNotificationSettings();
+  };
+
+  const [hasPinReminders, onPinRemindersChange] = createItemsAccess(
+    'pinReminders',
+    true,
+    value => {
+      drop(pinReminderService.handlePinRemindersSettingChanged(Boolean(value)));
+    }
+  );
 
   const [hasRelayCalls, onRelayCallsChange] = createItemsAccess(
     'always-relay-calls',
     false
   );
+
+  const hasSvrPin = useSelector(getHasSvrPin);
+  const hasRegistrationLock = useSelector(getHasRegistrationLock);
+  const onRegistrationLockChange = (value: boolean) => {
+    drop(maybeUpdateRegistrationLock(value));
+  };
+  const isSvrPinPending = useSelector(getIsSvrPinPending);
+
   const [hasStoriesDisabled, onHasStoriesDisabledChanged] = createItemsAccess(
     'hasStoriesDisabled',
     false,
@@ -800,21 +984,48 @@ export function SmartPreferences(): React.JSX.Element | null {
   const setDredDuration = useCallback((value: number | undefined) => {
     drop(itemStorage.put('dredDuration', value));
   }, []);
-  const setIsDirectVp9Enabled = useCallback((value: boolean | undefined) => {
-    drop(itemStorage.put('isDirectVp9Enabled', value));
+  const setCallStatsIntervalSecs = useCallback((value: number | undefined) => {
+    drop(itemStorage.put('callStatsIntervalSecs', value));
+  }, []);
+  const setEnableVp9Encode = useCallback((value: boolean | undefined) => {
+    drop(itemStorage.put('enableVp9Encode', value));
+  }, []);
+  const setEnableVp9Decode = useCallback((value: boolean | undefined) => {
+    drop(itemStorage.put('enableVp9Decode', value));
   }, []);
   const setDirectMaxBitrate = useCallback((value: number | undefined) => {
     drop(itemStorage.put('directMaxBitrate', value));
   }, []);
-  const setIsGroupVp9Enabled = useCallback((value: boolean | undefined) => {
-    drop(itemStorage.put('isGroupVp9Enabled', value));
-  }, []);
   const setGroupMaxBitrate = useCallback((value: number | undefined) => {
     drop(itemStorage.put('groupMaxBitrate', value));
   }, []);
+  const setIsGroupSvcEnabled = useCallback((value: boolean | undefined) => {
+    drop(itemStorage.put('isGroupSvcEnabled', value));
+  }, []);
+  const setGroupSvcMode = useCallback((value: string | undefined) => {
+    drop(itemStorage.put('groupSvcMode', value));
+  }, []);
+  const setGroupSvcModeForScreenshare = useCallback(
+    (value: string | undefined) => {
+      drop(itemStorage.put('groupSvcModeForScreenshare', value));
+    },
+    []
+  );
   const setSfuUrl = useCallback((value: string | undefined) => {
     drop(itemStorage.put('sfuUrl', value));
   }, []);
+
+  const saveAccountKeysPDF = useCallback(async () => {
+    const data = await window.Events.generatePDF({
+      view: 'account-keys',
+      serviceId: me.serviceId,
+      backupKey,
+    });
+    await saveAttachmentToDisk({
+      name: 'Signal_AccountKeys.pdf',
+      data,
+    });
+  }, [me.serviceId, backupKey]);
 
   if (currentLocation.tab !== NavTab.Settings) {
     return null;
@@ -830,221 +1041,251 @@ export function SmartPreferences(): React.JSX.Element | null {
   };
 
   return (
-    <StrictMode>
-      <AxoProvider dir={i18n.getLocaleDirection()}>
-        <Preferences
-          backupKey={backupKey}
-          backupKeyHash={backupKeyHash}
-          addCustomColor={addCustomColor}
-          autoDownloadAttachment={autoDownloadAttachment}
-          availableCameras={availableCameras}
-          availableLocales={availableLocales}
-          availableMicrophones={availableMicrophones}
-          availableSpeakers={availableSpeakers}
-          backupTier={backupLevelFromNumber(backupTier)}
-          backupSubscriptionStatus={
-            backupSubscriptionStatus ?? { status: 'not-found' }
-          }
-          backupFreeMediaDays={backupFreeMediaDays}
-          backupMediaDownloadStatus={{
-            completedBytes: backupMediaDownloadCompletedBytes ?? 0,
-            totalBytes: backupMediaDownloadTotalBytes ?? 0,
-            isPaused: Boolean(backupMediaDownloadPaused),
-            isIdle: Boolean(attachmentDownloadManagerIdled),
-          }}
-          backupLocalBackupsEnabled={backupLocalBackupsEnabled}
-          badge={badge}
-          blockedCount={blockedCount}
-          currentChatFoldersCount={currentChatFoldersCount}
-          cloudBackupStatus={cloudBackupStatus}
-          customColors={customColors}
-          defaultConversationColor={defaultConversationColor}
-          deviceName={deviceName}
-          disableLocalBackups={backupsService.disableLocalBackups}
-          emojiSkinToneDefault={emojiSkinToneDefault}
-          phoneNumber={phoneNumber}
-          doDeleteAllData={doDeleteAllData}
-          editCustomColor={editCustomColor}
-          getConversationsWithCustomColor={getConversationsWithCustomColor}
-          getMessageCountBySchemaVersion={
-            DataReader.getMessageCountBySchemaVersion
-          }
-          getMessageSampleForSchemaVersion={
-            DataReader.getMessageSampleForSchemaVersion
-          }
-          hasAnyCurrentCustomChatFolders={hasAnyCurrentCustomChatFolders}
-          hasAudioNotifications={hasAudioNotifications}
-          hasAutoConvertEmoji={hasAutoConvertEmoji}
-          hasAutoDownloadUpdate={hasAutoDownloadUpdate}
-          hasAutoLaunch={hasAutoLaunch}
-          hasKeepMutedChatsArchived={hasKeepMutedChatsArchived}
-          hasCallNotifications={hasCallNotifications}
-          hasCallRingtoneNotification={hasCallRingtoneNotification}
-          hasContentProtection={hasContentProtection}
-          hasCountMutedConversations={hasCountMutedConversations}
-          hasFailedStorySends={hasFailedStorySends}
-          hasHideMenuBar={hasHideMenuBar}
-          hasIncomingCallNotifications={hasIncomingCallNotifications}
-          hasKeyTransparencyDisabled={hasKeyTransparencyDisabled}
-          hasLinkPreviews={hasLinkPreviews}
-          hasMediaCameraPermissions={hasMediaCameraPermissions}
-          hasMediaPermissions={hasMediaPermissions}
-          hasMessageAudio={hasMessageAudio}
-          hasMinimizeToAndStartInSystemTray={hasMinimizeToAndStartInSystemTray}
-          hasMinimizeToSystemTray={hasMinimizeToSystemTray}
-          hasNotificationAttention={hasNotificationAttention}
-          hasNotifications={hasNotifications}
-          hasReadReceipts={hasReadReceipts}
-          hasRelayCalls={hasRelayCalls}
-          hasSpellCheck={hasSpellCheck}
-          hasStoriesDisabled={hasStoriesDisabled}
-          hasTextFormatting={hasTextFormatting}
-          hasTypingIndicators={hasTypingIndicators}
-          i18n={i18n}
-          initialSpellCheckSetting={initialSpellCheckSetting}
-          isAutoDownloadUpdatesSupported={isAutoDownloadUpdatesSupported}
-          isAutoLaunchSupported={isAutoLaunchSupported}
-          isContentProtectionNeeded={isContentProtectionNeeded}
-          isContentProtectionSupported={isContentProtectionSupported}
-          isHideMenuBarSupported={isHideMenuBarSupported}
-          isKeyTransparencyAvailable={isKeyTransparencyAvailable}
-          isMinimizeToAndStartInSystemTraySupported={
-            isMinimizeToAndStartInSystemTraySupported
-          }
-          isNotificationAttentionSupported={isNotificationAttentionSupported}
-          isPlaintextExportEnabled={isPlaintextExportEnabled}
-          isSyncSupported={isSyncSupported}
-          isSystemTraySupported={isSystemTraySupported}
-          isInternalUser={isInternalUser}
-          lastLocalBackup={lastLocalBackup}
-          lastSyncTime={lastSyncTime}
-          localBackupFolder={localBackupFolder}
-          localeOverride={localeOverride}
-          makeSyncRequest={makeSyncRequest}
-          me={me}
-          navTabsCollapsed={navTabsCollapsed}
-          notificationContent={notificationContent}
-          notificationProfileCount={notificationProfileCount}
-          onAudioNotificationsChange={onAudioNotificationsChange}
-          onAutoConvertEmojiChange={onAutoConvertEmojiChange}
-          onAutoDownloadAttachmentChange={onAutoDownloadAttachmentChange}
-          onAutoDownloadUpdateChange={onAutoDownloadUpdateChange}
-          onAutoLaunchChange={onAutoLaunchChange}
-          onBackupKeyViewed={onBackupKeyViewed}
-          onCallNotificationsChange={onCallNotificationsChange}
-          onCallRingtoneNotificationChange={onCallRingtoneNotificationChange}
-          onContentProtectionChange={onContentProtectionChange}
-          onCountMutedConversationsChange={onCountMutedConversationsChange}
-          onEmojiSkinToneDefaultChange={onEmojiSkinToneDefaultChange}
-          onHasKeyTransparencyDisabledChanged={
-            onHasKeyTransparencyDisabledChanged
-          }
-          onHasStoriesDisabledChanged={onHasStoriesDisabledChanged}
-          onHideMenuBarChange={onHideMenuBarChange}
-          onIncomingCallNotificationsChange={onIncomingCallNotificationsChange}
-          onKeepMutedChatsArchivedChange={onKeepMutedChatsArchivedChange}
-          onLastSyncTimeChange={onLastSyncTimeChange}
-          onLocaleChange={onLocaleChange}
-          onMediaCameraPermissionsChange={onMediaCameraPermissionsChange}
-          onMediaPermissionsChange={onMediaPermissionsChange}
-          onMessageAudioChange={onMessageAudioChange}
-          onMinimizeToAndStartInSystemTrayChange={
-            onMinimizeToAndStartInSystemTrayChange
-          }
-          onMinimizeToSystemTrayChange={onMinimizeToSystemTrayChange}
-          onNotificationAttentionChange={onNotificationAttentionChange}
-          onNotificationContentChange={onNotificationContentChange}
-          onNotificationsChange={onNotificationsChange}
-          onStartUpdate={startUpdate}
-          onRelayCallsChange={onRelayCallsChange}
-          onSelectedCameraChange={onSelectedCameraChange}
-          onSelectedMicrophoneChange={onSelectedMicrophoneChange}
-          onSelectedSpeakerChange={onSelectedSpeakerChange}
-          onSentMediaQualityChange={onSentMediaQualityChange}
-          onSpellCheckChange={onSpellCheckChange}
-          onTextFormattingChange={onTextFormattingChange}
-          onThemeChange={onThemeChange}
-          onToggleNavTabsCollapse={toggleNavTabsCollapse}
-          onUniversalExpireTimerChange={onUniversalExpireTimerChange}
-          onWhoCanFindMeChange={onWhoCanFindMeChange}
-          onWhoCanSeeMeChange={onWhoCanSeeMeChange}
-          onZoomFactorChange={onZoomFactorChange}
-          openFileInFolder={openFileInFolder}
-          osName={osName}
-          otherTabsUnreadStats={otherTabsUnreadStats}
-          settingsLocation={settingsLocation}
-          pickLocalBackupFolder={pickLocalBackupFolder}
-          preferredSystemLocales={preferredSystemLocales}
-          preferredWidthFromStorage={preferredWidthFromStorage}
-          refreshCloudBackupStatus={refreshCloudBackupStatus}
-          refreshBackupSubscriptionStatus={refreshBackupSubscriptionStatus}
-          removeCustomColorOnConversations={removeCustomColorOnConversations}
-          removeCustomColor={removeCustomColor}
-          renderDonationsPane={renderDonationsPane}
-          renderNotificationProfilesHome={renderNotificationProfilesHome}
-          renderNotificationProfilesCreateFlow={
-            renderNotificationProfilesCreateFlow
-          }
-          renderProfileEditor={renderProfileEditor}
-          renderToastManager={renderToastManagerWithoutMegaphone}
-          renderUpdateDialog={renderUpdateDialog}
-          renderPreferencesChatFoldersPage={renderPreferencesChatFoldersPage}
-          renderPreferencesEditChatFolderPage={
-            renderPreferencesEditChatFolderPage
-          }
-          previouslyViewedBackupKeyHash={previouslyViewedBackupKeyHash}
-          promptOSAuth={promptOSAuth}
-          resetAllChatColors={resetAllChatColors}
-          resetDefaultChatColor={resetDefaultChatColor}
-          resolvedLocale={resolvedLocale}
-          savePreferredLeftPaneWidth={savePreferredLeftPaneWidth}
-          resumeBackupMediaDownload={resumeBackupMediaDownload}
-          pauseBackupMediaDownload={pauseBackupMediaDownload}
-          cancelBackupMediaDownload={cancelBackupMediaDownload}
-          selectedCamera={selectedCamera}
-          selectedMicrophone={selectedMicrophone}
-          selectedSpeaker={selectedSpeaker}
-          sentMediaQualitySetting={sentMediaQualitySetting}
-          setGlobalDefaultConversationColor={setGlobalDefaultConversationColor}
-          setSettingsLocation={setSettingsLocation}
-          shouldShowUpdateDialog={shouldShowUpdateDialog}
-          showToast={showToast}
-          startLocalBackupExport={startLocalBackupExport}
-          startPlaintextExport={startPlaintextExport}
-          theme={theme}
-          themeSetting={themeSetting}
-          universalExpireTimer={universalExpireTimer}
-          validateBackup={validateBackup}
-          whoCanFindMe={whoCanFindMe}
-          whoCanSeeMe={whoCanSeeMe}
-          zoomFactor={zoomFactor}
-          donationReceipts={donationReceipts}
-          internalAddDonationReceipt={internalAddDonationReceipt}
-          saveAttachmentToDisk={saveAttachmentToDisk}
-          generateDonationReceiptBlob={generateDonationReceiptBlob}
-          addVisibleMegaphone={addVisibleMegaphone}
-          internalDeleteAllMegaphones={internalDeleteAllMegaphones}
-          __dangerouslyRunAbitraryReadOnlySqlQuery={
-            __dangerouslyRunAbitraryReadOnlySqlQuery
-          }
-          cqsTestMode={cqsTestMode}
-          setCqsTestMode={setCqsTestMode}
-          dredDuration={items.dredDuration}
-          setDredDuration={setDredDuration}
-          setIsDirectVp9Enabled={setIsDirectVp9Enabled}
-          isDirectVp9Enabled={items.isDirectVp9Enabled}
-          setDirectMaxBitrate={setDirectMaxBitrate}
-          directMaxBitrate={items.directMaxBitrate}
-          setIsGroupVp9Enabled={setIsGroupVp9Enabled}
-          isGroupVp9Enabled={items.isGroupVp9Enabled}
-          setGroupMaxBitrate={setGroupMaxBitrate}
-          groupMaxBitrate={items.groupMaxBitrate}
-          sfuUrl={items.sfuUrl}
-          setSfuUrl={setSfuUrl}
-          forceKeyTransparencyCheck={forceKeyTransparencyCheck}
-          keyTransparencySelfHealth={items.keyTransparencySelfHealth}
-        />
-      </AxoProvider>
-    </StrictMode>
+    <AppProvider>
+      <Preferences
+        backupKey={backupKey}
+        backupKeyHash={backupKeyHash}
+        addCustomColor={addCustomColor}
+        autoDownloadAttachment={autoDownloadAttachment}
+        availableCameras={availableCameras}
+        availableLocales={availableLocales}
+        availableMicrophones={availableMicrophones}
+        availableSpeakers={availableSpeakers}
+        backupTier={backupLevelFromNumber(backupTier)}
+        backupSubscriptionStatus={
+          backupSubscriptionStatus ?? { status: 'not-found' }
+        }
+        backupFreeMediaDays={backupFreeMediaDays}
+        backupMediaDownloadStatus={{
+          completedBytes: backupMediaDownloadCompletedBytes ?? 0,
+          totalBytes: backupMediaDownloadTotalBytes ?? 0,
+          isPaused: Boolean(backupMediaDownloadPaused),
+          isIdle: Boolean(attachmentDownloadManagerIdled),
+        }}
+        backupLocalBackupsEnabled={backupLocalBackupsEnabled}
+        badge={badge}
+        blockedContacts={blockedContacts}
+        blockedGroups={blockedGroups}
+        currentChatFoldersCount={currentChatFoldersCount}
+        cloudBackupStatus={cloudBackupStatus}
+        customColors={customColors}
+        defaultConversationColor={defaultConversationColor}
+        deviceName={deviceName}
+        disableLocalBackups={backupsService.disableLocalBackups}
+        disableSignalPin={disableSignalPin}
+        emojiSkinToneDefault={emojiSkinToneDefault}
+        phoneNumber={phoneNumber}
+        doDeleteAllData={doDeleteAllData}
+        editCustomColor={editCustomColor}
+        getConversationsWithCustomColor={getConversationsWithCustomColor}
+        getMessageCountBySchemaVersion={
+          DataReader.getMessageCountBySchemaVersion
+        }
+        getMessageSampleForSchemaVersion={
+          DataReader.getMessageSampleForSchemaVersion
+        }
+        getPreferredBadge={getPreferredBadge}
+        hasAnyCurrentCustomChatFolders={hasAnyCurrentCustomChatFolders}
+        hasAudioNotifications={hasAudioNotifications}
+        hasAutoConvertEmoji={hasAutoConvertEmoji}
+        hasAutoDownloadUpdate={hasAutoDownloadUpdate}
+        hasAutoLaunch={hasAutoLaunch}
+        hasKeepMutedChatsArchived={hasKeepMutedChatsArchived}
+        hasCallRingtoneNotification={hasCallRingtoneNotification}
+        hasContentProtection={hasContentProtection}
+        hasCountMutedConversations={hasCountMutedConversations}
+        hasFailedStorySends={hasFailedStorySends}
+        hasHideMenuBar={hasHideMenuBar}
+        hasIncomingCallNotifications={hasIncomingCallNotifications}
+        hasKeyTransparencyDisabled={hasKeyTransparencyDisabled}
+        hasLinkPreviews={hasLinkPreviews}
+        hasMediaCameraPermissions={hasMediaCameraPermissions}
+        hasMediaPermissions={hasMediaPermissions}
+        hasMessageAudio={hasMessageAudio}
+        hasMinimizeToAndStartInSystemTray={hasMinimizeToAndStartInSystemTray}
+        hasMinimizeToSystemTray={hasMinimizeToSystemTray}
+        hasNotificationAttention={hasNotificationAttention}
+        hasNotifications={hasNotifications}
+        hasPinReminders={hasPinReminders}
+        hasPreferContactAvatars={hasPreferContactAvatars}
+        hasReactionNotifications={hasReactionNotifications}
+        hasReadReceipts={hasReadReceipts}
+        hasRegistrationLock={hasRegistrationLock}
+        hasRelayCalls={hasRelayCalls}
+        hasSealedSenderIndicators={hasSealedSenderIndicators}
+        hasSpellCheck={hasSpellCheck}
+        hasStoriesDisabled={hasStoriesDisabled}
+        hasSvrPin={hasSvrPin}
+        hasTextFormatting={hasTextFormatting}
+        hasTypingIndicators={hasTypingIndicators}
+        hasUnreadReminders={hasUnreadReminders}
+        i18n={i18n}
+        initialSpellCheckSetting={initialSpellCheckSetting}
+        isAutoDownloadUpdatesSupported={isAutoDownloadUpdatesSupported}
+        isAutoLaunchSupported={isAutoLaunchSupported}
+        isContentProtectionNeeded={isContentProtectionNeeded}
+        isContentProtectionSupported={isContentProtectionSupported}
+        isHideMenuBarSupported={isHideMenuBarSupported}
+        isKeyTransparencyAvailable={isKeyTransparencyAvailable}
+        isMinimizeToAndStartInSystemTraySupported={
+          isMinimizeToAndStartInSystemTraySupported
+        }
+        isNotificationAttentionSupported={isNotificationAttentionSupported}
+        isSvrPinPending={isSvrPinPending}
+        isSyncSupported={isSyncSupported}
+        isSystemTraySupported={isSystemTraySupported}
+        isInternalUser={isInternalUser}
+        lastLocalBackup={lastLocalBackup}
+        lastSyncTime={lastSyncTime}
+        localBackupFolder={localBackupFolder}
+        localeOverride={localeOverride}
+        makeSyncRequest={makeSyncRequest}
+        me={me}
+        navTabsCollapsed={navTabsCollapsed}
+        notificationContent={notificationContent}
+        notifyWhileMuted={notifyWhileMuted}
+        onAudioNotificationsChange={onAudioNotificationsChange}
+        onAutoConvertEmojiChange={onAutoConvertEmojiChange}
+        onAutoDownloadAttachmentChange={onAutoDownloadAttachmentChange}
+        onAutoDownloadUpdateChange={onAutoDownloadUpdateChange}
+        onAutoLaunchChange={onAutoLaunchChange}
+        onBackupKeyViewed={onBackupKeyViewed}
+        onCallRingtoneNotificationChange={onCallRingtoneNotificationChange}
+        onContentProtectionChange={onContentProtectionChange}
+        onCountMutedConversationsChange={onCountMutedConversationsChange}
+        onEmojiSkinToneDefaultChange={onEmojiSkinToneDefaultChange}
+        onHasKeyTransparencyDisabledChanged={
+          onHasKeyTransparencyDisabledChanged
+        }
+        onPinRemindersChange={onPinRemindersChange}
+        onHasStoriesDisabledChanged={onHasStoriesDisabledChanged}
+        onHideMenuBarChange={onHideMenuBarChange}
+        onIncomingCallNotificationsChange={onIncomingCallNotificationsChange}
+        onKeepMutedChatsArchivedChange={onKeepMutedChatsArchivedChange}
+        onLastSyncTimeChange={onLastSyncTimeChange}
+        onLinkPreviewsChange={onLinkPreviewsChange}
+        onLocaleChange={onLocaleChange}
+        onMediaCameraPermissionsChange={onMediaCameraPermissionsChange}
+        onMediaPermissionsChange={onMediaPermissionsChange}
+        onMessageAudioChange={onMessageAudioChange}
+        onMinimizeToAndStartInSystemTrayChange={
+          onMinimizeToAndStartInSystemTrayChange
+        }
+        onMinimizeToSystemTrayChange={onMinimizeToSystemTrayChange}
+        onNotificationAttentionChange={onNotificationAttentionChange}
+        onNotificationContentChange={onNotificationContentChange}
+        onNotificationsChange={onNotificationsChange}
+        onNotifyWhileMutedChange={onNotifyWhileMutedChange}
+        onStartUpdate={startUpdate}
+        onPreferContactAvatarsChange={onPreferContactAvatarsChange}
+        onReactionNotificationsChange={onReactionNotificationsChange}
+        onReadReceiptsChange={onReadReceiptsChange}
+        onRegistrationLockChange={onRegistrationLockChange}
+        onRelayCallsChange={onRelayCallsChange}
+        onResetNotificationSettings={onResetNotificationSettings}
+        onSealedSenderIndicatorsChange={onSealedSenderIndicatorsChange}
+        onSelectedCameraChange={onSelectedCameraChange}
+        onSelectedMicrophoneChange={onSelectedMicrophoneChange}
+        onSelectedSpeakerChange={onSelectedSpeakerChange}
+        onSentMediaQualityChange={onSentMediaQualityChange}
+        onSpellCheckChange={onSpellCheckChange}
+        onTextFormattingChange={onTextFormattingChange}
+        onThemeChange={onThemeChange}
+        onToggleNavTabsCollapse={toggleNavTabsCollapse}
+        onTypingIndicatorsChange={onTypingIndicatorsChange}
+        onUniversalExpireTimerChange={onUniversalExpireTimerChange}
+        onUnreadCountBadgeTypeChange={onUnreadCountBadgeTypeChange}
+        onUnreadRemindersChange={onUnreadRemindersChange}
+        onWhoCanFindMeChange={onWhoCanFindMeChange}
+        onWhoCanSeeMeChange={onWhoCanSeeMeChange}
+        onZoomFactorChange={onZoomFactorChange}
+        openFileInFolder={openFileInFolder}
+        osName={osName}
+        otherTabsUnreadCount={otherTabsUnreadCount}
+        settingsLocation={settingsLocation}
+        pickLocalBackupFolder={pickLocalBackupFolder}
+        preferredSystemLocales={preferredSystemLocales}
+        preferredWidthFromStorage={preferredWidthFromStorage}
+        refreshCloudBackupStatus={refreshCloudBackupStatus}
+        refreshBackupSubscriptionStatus={refreshBackupSubscriptionStatus}
+        removeCustomColorOnConversations={removeCustomColorOnConversations}
+        removeCustomColor={removeCustomColor}
+        renderDonationsPane={renderDonationsPane}
+        renderNotificationProfilesHome={renderNotificationProfilesHome}
+        renderNotificationProfilesCreateFlow={
+          renderNotificationProfilesCreateFlow
+        }
+        renderProfileEditor={renderProfileEditor}
+        renderToastManager={renderToastManagerWithoutMegaphone}
+        renderUpdateDialog={renderUpdateDialog}
+        renderPreferencesChatFoldersPage={renderPreferencesChatFoldersPage}
+        renderPreferencesEditChatFolderPage={
+          renderPreferencesEditChatFolderPage
+        }
+        previouslyViewedBackupKeyHash={previouslyViewedBackupKeyHash}
+        promptOSAuth={promptOSAuth}
+        resetAllChatColors={resetAllChatColors}
+        resetDefaultChatColor={resetDefaultChatColor}
+        resolvedLocale={resolvedLocale}
+        savePreferredLeftPaneWidth={savePreferredLeftPaneWidth}
+        resumeBackupMediaDownload={resumeBackupMediaDownload}
+        pauseBackupMediaDownload={pauseBackupMediaDownload}
+        cancelBackupMediaDownload={cancelBackupMediaDownload}
+        selectedCamera={selectedCamera}
+        selectedMicrophone={selectedMicrophone}
+        selectedSpeaker={selectedSpeaker}
+        sentMediaQualitySetting={sentMediaQualitySetting}
+        setGlobalDefaultConversationColor={setGlobalDefaultConversationColor}
+        setSettingsLocation={setSettingsLocation}
+        shouldShowUpdateDialog={shouldShowUpdateDialog}
+        showPinChangeModal={showPinChangeModal}
+        showToast={showToast}
+        startLocalBackupExport={startLocalBackupExport}
+        startPlaintextExport={startPlaintextExport}
+        theme={theme}
+        themeSetting={themeSetting}
+        universalExpireTimer={universalExpireTimer}
+        unreadCountBadgeType={unreadCountBadgeType}
+        validateBackup={validateBackup}
+        whoCanFindMe={whoCanFindMe}
+        whoCanSeeMe={whoCanSeeMe}
+        zoomFactor={zoomFactor}
+        donationReceipts={donationReceipts}
+        internalAddDonationReceipt={internalAddDonationReceipt}
+        saveAttachmentToDisk={saveAttachmentToDisk}
+        generateDonationReceiptBlob={generateDonationReceiptBlob}
+        addVisibleMegaphone={addVisibleMegaphone}
+        internalDeleteAllMegaphones={internalDeleteAllMegaphones}
+        __dangerouslyRunAbitraryReadOnlySqlQuery={
+          __dangerouslyRunAbitraryReadOnlySqlQuery
+        }
+        cqsTestMode={cqsTestMode}
+        setCqsTestMode={setCqsTestMode}
+        dredDuration={items.dredDuration}
+        setDredDuration={setDredDuration}
+        callStatsIntervalSecs={items.callStatsIntervalSecs}
+        setCallStatsIntervalSecs={setCallStatsIntervalSecs}
+        enableVp9Encode={items.enableVp9Encode}
+        setEnableVp9Encode={setEnableVp9Encode}
+        enableVp9Decode={items.enableVp9Decode}
+        setEnableVp9Decode={setEnableVp9Decode}
+        setDirectMaxBitrate={setDirectMaxBitrate}
+        directMaxBitrate={items.directMaxBitrate}
+        setGroupMaxBitrate={setGroupMaxBitrate}
+        groupMaxBitrate={items.groupMaxBitrate}
+        isGroupSvcEnabled={items.isGroupSvcEnabled}
+        setIsGroupSvcEnabled={setIsGroupSvcEnabled}
+        groupSvcMode={items.groupSvcMode}
+        setGroupSvcMode={setGroupSvcMode}
+        groupSvcModeForScreenshare={items.groupSvcModeForScreenshare}
+        setGroupSvcModeForScreenshare={setGroupSvcModeForScreenshare}
+        sfuUrl={items.sfuUrl}
+        setSfuUrl={setSfuUrl}
+        forceKeyTransparencyCheck={forceKeyTransparencyCheck}
+        saveAccountKeysPDF={saveAccountKeysPDF}
+        keyTransparencySelfHealth={items.keyTransparencySelfHealth}
+        weArePrimaryDevice={weArePrimaryDevice}
+      />
+    </AppProvider>
   );
 }

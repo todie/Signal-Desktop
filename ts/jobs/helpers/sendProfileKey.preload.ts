@@ -10,6 +10,7 @@ import {
   isDirectConversation,
   isGroup,
   isGroupV2,
+  isMe,
 } from '../../util/whatTypeOfConversation.dom.ts';
 import { SignalService as Proto } from '../../protobuf/index.std.ts';
 import {
@@ -36,10 +37,11 @@ import { shouldSendToConversation } from './shouldSendToConversation.preload.ts'
 import { sendToGroup } from '../../util/sendToGroup.preload.ts';
 import { itemStorage } from '../../textsecure/Storage.preload.ts';
 import { strictAssert } from '../../util/assert.std.ts';
+import { isTrustedContact } from '../../util/isConversationAccepted.preload.ts';
 
 const { isNumber } = lodash;
 
-export function canAllErrorsBeIgnored(
+function canAllErrorsBeIgnored(
   conversation: ConversationAttributesType,
   error: unknown
 ): boolean {
@@ -83,8 +85,19 @@ export async function sendProfileKey(
     return;
   }
 
-  if (!data?.isOneTimeSend && !conversation.get('profileSharing')) {
-    log.info('No longer sharing profile. Canceling job.');
+  if (data?.isOneTimeSend) {
+    log.info('isOneTimeSend=true; ignoring conversation state');
+  } else if (
+    isDirectConversation(conversation.attributes) &&
+    !isTrustedContact(conversation.attributes)
+  ) {
+    log.error('Not a trusted contact:', conversation.idForLogging());
+    return;
+  } else if (
+    isGroup(conversation.attributes) &&
+    !conversation.get('profileSharing')
+  ) {
+    log.error('Not a trusted group:', conversation.idForLogging());
     return;
   }
 
@@ -99,7 +112,6 @@ export async function sendProfileKey(
   );
 
   const { revision } = data;
-  const sendOptions = await getSendOptions(conversation.attributes);
   const contentHint = ContentHint.Resendable;
   const sendType = 'profileKeyUpdate';
 
@@ -118,22 +130,35 @@ export async function sendProfileKey(
       );
       return;
     }
+    if (
+      isMe(conversation.attributes) &&
+      !window.ConversationController.doWeHaveOtherDevices()
+    ) {
+      log.info(
+        'sendProfileKey: We have no other devices; not sending sync message'
+      );
+      return;
+    }
 
-    const proto = await messaging.getContentMessage({
-      flags: Proto.DataMessage.Flags.PROFILE_KEY_UPDATE,
-      profileKey,
-      recipients: conversation.getRecipients(),
-      expireTimerVersion: undefined,
-      timestamp,
-      includePniSignatureMessage: true,
-    });
-    sendPromise = messaging.sendIndividualProto({
-      contentHint,
-      serviceId: conversation.getSendTarget(),
-      options: sendOptions,
-      proto,
-      timestamp,
-      urgent: false,
+    sendPromise = conversation.queueJob('sendProfileKey/direct', async () => {
+      const proto = await messaging.getContentMessage({
+        flags: Proto.DataMessage.Flags.PROFILE_KEY_UPDATE,
+        profileKey,
+        recipients: conversation.getRecipients(),
+        expireTimerVersion: undefined,
+        timestamp,
+        includePniSignatureMessage: true,
+      });
+
+      const sendOptions = await getSendOptions(conversation.attributes);
+      return messaging.sendIndividualProto({
+        contentHint,
+        serviceId: conversation.getSendTarget(),
+        options: sendOptions,
+        proto,
+        timestamp,
+        urgent: false,
+      });
     });
   } else {
     if (isGroupV2(conversation.attributes) && !isNumber(revision)) {
@@ -148,25 +173,28 @@ export async function sendProfileKey(
       return;
     }
 
-    const groupV2Info = conversation.getGroupV2Info();
-    strictAssert(groupV2Info, 'Missing groupV2Info');
-    if (isNumber(revision)) {
-      groupV2Info.revision = revision;
-    }
+    sendPromise = conversation.queueJob('sendProfileKey/group', async () => {
+      const groupV2Info = conversation.getGroupV2Info();
+      strictAssert(groupV2Info, 'Missing groupV2Info');
+      if (isNumber(revision)) {
+        groupV2Info.revision = revision;
+      }
 
-    sendPromise = sendToGroup({
-      contentHint,
-      groupSendOptions: {
-        flags: Proto.DataMessage.Flags.PROFILE_KEY_UPDATE,
-        groupV2: groupV2Info,
-        profileKey,
-        timestamp,
-      },
-      messageId: undefined,
-      sendOptions,
-      sendTarget: conversation.toSenderKeyTarget(),
-      sendType,
-      urgent: false,
+      const sendOptions = await getSendOptions(conversation.attributes);
+      return sendToGroup({
+        contentHint,
+        groupSendOptions: {
+          flags: Proto.DataMessage.Flags.PROFILE_KEY_UPDATE,
+          groupV2: groupV2Info,
+          profileKey,
+          timestamp,
+        },
+        messageId: undefined,
+        sendOptions,
+        sendTarget: conversation.toSenderKeyTarget(),
+        sendType,
+        urgent: false,
+      });
     });
   }
 

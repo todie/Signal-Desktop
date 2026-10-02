@@ -1,13 +1,14 @@
 // Copyright 2018 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import React, {
+import {
   Fragment,
   useEffect,
   useRef,
   useCallback,
   useState,
   useMemo,
+  type JSX,
 } from 'react';
 
 import moment from 'moment';
@@ -65,7 +66,7 @@ export type Props = {
   renderMediaItem: (props: {
     onItemClick: (event: ItemClickEvent) => unknown;
     mediaItem: GenericMediaItemType;
-  }) => React.JSX.Element;
+  }) => JSX.Element;
 };
 
 const MONTH_FORMAT = 'MMMM YYYY';
@@ -98,7 +99,7 @@ function MediaSection({
   tab: MediaTabType;
   sortOrder: MediaSortOrderType;
   mediaItems: ReadonlyArray<GenericMediaItemType>;
-}): React.JSX.Element {
+}): JSX.Element {
   const onItemClick = useCallback(
     (event: ItemClickEvent) => {
       const { state, mediaItem } = event;
@@ -159,6 +160,7 @@ function MediaSection({
     return <EmptyState i18n={i18n} tab={tab} />;
   }
 
+  // oxlint-disable-next-line react/purity
   const now = Date.now();
   const groupedItems = groupMediaItemsByDate(now, mediaItems);
 
@@ -213,9 +215,7 @@ function MediaSection({
           renderMediaItem={renderMediaItem}
         />
         {!isGrid && !isLast && (
-          <hr
-            className={tw('mx-4 my-3 border-[0.5px] border-border-primary')}
-          />
+          <hr className={tw('mx-4 my-3 border-[0.5px] border-primary')} />
         )}
       </Fragment>
     );
@@ -251,13 +251,14 @@ export function MediaGallery({
   playAudio,
   showLightbox,
   renderMediaItem,
-}: Props): React.JSX.Element {
+}: Props): JSX.Element {
   const focusRef = useRef<HTMLDivElement | null>(null);
   const [loading, setLoading] = useState(reduxLoading);
 
   // Reset local state when redux finishes loading
   useEffect(() => {
-    if (reduxLoading === false) {
+    if (!reduxLoading) {
+      // oxlint-disable-next-line react/set-state-in-effect
       setLoading(false);
     }
   }, [reduxLoading]);
@@ -291,6 +292,7 @@ export function MediaGallery({
     audio.length,
     links.length,
     documents.length,
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies
     sortOrder,
   ]);
 
@@ -327,6 +329,7 @@ export function MediaGallery({
     } else {
       throw missingCaseError(tab);
     }
+    // oxlint-disable-next-line react/set-state-in-effect
     setLoading(true);
   }, [
     observerEntry,
@@ -356,7 +359,10 @@ export function MediaGallery({
 
   return (
     <div
-      className={tw('flex size-full grow flex-col outline-none')}
+      className={tw(
+        'flex size-full grow flex-col',
+        'focus-visible:axo-focus-ring'
+      )}
       tabIndex={-1}
       ref={focusRef}
     >

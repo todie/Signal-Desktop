@@ -7,9 +7,11 @@ import {
   PublicKey,
   usernames,
 } from '@signalapp/libsignal-client';
-import type {
-  Request,
-  E164Info,
+import {
+  type Request,
+  type E164Info,
+  resetField,
+  AccountDataField,
 } from '@signalapp/libsignal-client/dist/net/KeyTransparency.js';
 import pTimeout from 'p-timeout';
 
@@ -32,6 +34,8 @@ import { createLogger } from '../logging/log.std.ts';
 import { isEnabled } from '../RemoteConfig.dom.ts';
 import { DataWriter } from '../sql/Client.preload.ts';
 import { runStorageServiceSyncJob } from './storage.preload.ts';
+import { hasUsernameChangeSyncCapability } from './username.preload.ts';
+import { KeyTransparencyStore } from '../LibSignalStores.node.ts';
 
 const log = createLogger('KeyTransparency');
 
@@ -54,9 +58,9 @@ export function isKeyTransparencyAvailable(): boolean {
   });
 }
 
-export class KeyTransparency {
+class KeyTransparency {
   #isRunning = false;
-  #scheduler = new CheckScheduler({
+  readonly #scheduler = new CheckScheduler({
     name: 'KeyTransparency',
     interval: WEEK,
     storageKey: 'lastKeyTransparencySelfCheck',
@@ -71,7 +75,7 @@ export class KeyTransparency {
     },
   });
 
-  #selfCheckDedup = new TaskDeduplicator(
+  readonly #selfCheckDedup = new TaskDeduplicator(
     'KeyTransparency.selfCheck',
     abortSignal => this.#selfCheck(abortSignal)
   );
@@ -92,7 +96,15 @@ export class KeyTransparency {
     this.#scheduler.start();
   }
 
-  public async onKnownIdentifierChange(): Promise<void> {
+  public async onKnownIdentifierChange(
+    field: 'e164' | 'username' | 'accessKey' | 'phoneNumberDiscoverability'
+  ): Promise<void> {
+    if (field === 'e164') {
+      await this.#resetSelfIdentifier(AccountDataField.E164);
+    } else if (field === 'username') {
+      await this.#resetSelfIdentifier(AccountDataField.UsernameHash);
+    }
+
     await this.#scheduler.delayBy(KNOWN_IDENTIFIER_CHANGE_DELAY);
   }
 
@@ -195,8 +207,7 @@ export class KeyTransparency {
       itemStorage.get('phoneNumberDiscoverability') ===
       PhoneNumberDiscoverability.Discoverable;
 
-    const ourE164 = itemStorage.user.getNumber();
-    strictAssert(ourE164 != null, 'missing our e164');
+    const ourE164 = itemStorage.user.getOptionalNumber();
 
     me.deriveAccessKeyIfNeeded();
     const ourAccessKey = me.get('accessKey');
@@ -204,9 +215,11 @@ export class KeyTransparency {
 
     let usernameHash: Uint8Array<ArrayBuffer> | undefined;
 
-    const username = me.get('username');
-    if (username != null && !itemStorage.get('usernameCorrupted')) {
-      usernameHash = usernames.hash(username);
+    if (hasUsernameChangeSyncCapability()) {
+      const username = me.get('username');
+      if (username != null && !itemStorage.get('usernameCorrupted')) {
+        usernameHash = usernames.hash(username);
+      }
     }
 
     if (itemStorage.get('keyTransparencySelfHealth') === 'intermittent') {
@@ -220,7 +233,7 @@ export class KeyTransparency {
         resolve()
       );
 
-      await pTimeout(once, STORAGE_SERVICE_TIMEOUT);
+      await pTimeout(once, { milliseconds: STORAGE_SERVICE_TIMEOUT });
     }
 
     try {
@@ -232,10 +245,13 @@ export class KeyTransparency {
             aci: toAciObject(ourAci),
             identityKey: keyPair.publicKey,
           },
-          e164Info: {
-            e164: ourE164,
-            unidentifiedAccessKey: Bytes.fromBase64(ourAccessKey),
-          },
+          e164Info:
+            ourE164 != null
+              ? {
+                  e164: ourE164,
+                  unidentifiedAccessKey: Bytes.fromBase64(ourAccessKey),
+                }
+              : undefined,
           usernameHash,
         },
         abortSignal
@@ -266,6 +282,7 @@ export class KeyTransparency {
           error.is(ErrorCode.KeyTransparencyError) ||
           error.is(ErrorCode.ChatServiceInactive) ||
           error.is(ErrorCode.IoError) ||
+          error.is(ErrorCode.PossibleCaptiveNetwork) ||
           error.is(ErrorCode.RateLimitedError)
         ) {
           if (oldResult === 'intermittent' || oldResult === 'fail') {
@@ -350,6 +367,19 @@ export class KeyTransparency {
       }
 
       return this.#check(request, abortSignal, backOff);
+    }
+  }
+
+  async #resetSelfIdentifier(field: AccountDataField): Promise<void> {
+    try {
+      const ourAci = itemStorage.user.getCheckedAci();
+      const store = new KeyTransparencyStore(signalProtocolStore);
+      await resetField(toAciObject(ourAci), field, store);
+    } catch (error) {
+      log.error(
+        `resetSelfIdentifier(${AccountDataField[field]}): failed`,
+        toLogFormat(error)
+      );
     }
   }
 }

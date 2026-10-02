@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { Meta, StoryFn } from '@storybook/react';
-import React from 'react';
 import { ListTile } from './ListTile.dom.tsx';
 import type { Props } from './ListTile.dom.tsx';
 import { CircleCheckbox } from './CircleCheckbox.dom.tsx';
@@ -93,14 +92,4 @@ Item.args = {
   title: <UserText text="Some user" />,
   subtitle: 'Hello my friend',
   clickable: true,
-};
-
-export const PanelRow = TemplateList(800).bind({});
-PanelRow.args = {
-  leading: circleAvatar,
-  title: 'Some user',
-  subtitle: 'Hello my friend',
-  trailing: <div className="ConversationDetails-panel-row__right">Admin</div>,
-  clickable: false,
-  variant: 'panelrow',
 };

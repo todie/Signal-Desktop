@@ -6,7 +6,7 @@ import { trigger } from '../../shims/events.dom.ts';
 import type { LocaleMessagesType } from '../../types/I18N.std.ts';
 import type { LocalizerType } from '../../types/Util.std.ts';
 import type { MenuOptionsType } from '../../types/menu.std.ts';
-import type { NoopActionType } from './noop.std.ts';
+import { noopAction, type NoopActionType } from './noop.std.ts';
 import type { AciString, PniString } from '../../types/ServiceId.std.ts';
 import OS from '../../util/os/osMain.node.ts';
 import { ThemeType } from '../../types/Util.std.ts';
@@ -19,7 +19,6 @@ import { useBoundActions } from '../../hooks/useBoundActions.std.ts';
 export type UserStateType = Readonly<{
   attachmentsPath: string;
   i18n: LocalizerType;
-  interactionMode: 'mouse' | 'keyboard';
   isMainWindowFullScreen: boolean;
   isMainWindowMaximized: boolean;
   localeMessages: LocaleMessagesType;
@@ -49,7 +48,6 @@ type UserChangedActionType = ReadonlyDeep<{
     ourPni?: PniString;
     ourNumber?: string;
     regionCode?: string;
-    interactionMode?: 'mouse' | 'keyboard';
     theme?: ThemeType;
     isMainWindowMaximized?: boolean;
     isMainWindowFullScreen?: boolean;
@@ -85,7 +83,6 @@ function eraseStorageServiceState(): EraseStorageServiceStateAction {
 }
 
 function userChanged(attributes: {
-  interactionMode?: 'mouse' | 'keyboard';
   ourConversationId?: string;
   ourDeviceId?: number;
   ourNumber?: string;
@@ -106,10 +103,7 @@ function userChanged(attributes: {
 function manualReconnect(): NoopActionType {
   trigger('manualConnect');
 
-  return {
-    type: 'NOOP',
-    payload: null,
-  };
+  return noopAction('manualReconnect');
 }
 
 const intlNotSetup = () => {
@@ -140,7 +134,6 @@ export function getEmptyState(): UserStateType {
       trackUsage: intlNotSetup,
       stopTrackingUsage: intlNotSetup,
     }),
-    interactionMode: 'mouse',
     isMainWindowMaximized: false,
     isMainWindowFullScreen: false,
     localeMessages: {},

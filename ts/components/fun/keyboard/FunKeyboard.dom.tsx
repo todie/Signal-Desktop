@@ -1,10 +1,9 @@
 // Copyright 2025 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 import { focusSafely, getFocusableTreeWalker } from '@react-aria/focus';
-import type { ReactNode, RefObject } from 'react';
-import React, { useEffect, useRef } from 'react';
-// @ts-expect-error - Needs tinykeys to update package.json type resolution
-import { createKeybindingsHandler } from 'tinykeys';
+import type { ReactNode, RefObject, JSX } from 'react';
+import { useEffect, useRef } from 'react';
+import { tinykeys } from 'tinykeys';
 import { strictAssert } from '../../../util/assert.std.ts';
 
 export abstract class KeyboardDelegate<State> {
@@ -25,13 +24,8 @@ export abstract class KeyboardDelegate<State> {
   abstract onModEnd(state: State): State;
 }
 
-export type FunKeyboardNavigationOptions<State> = Readonly<{
-  scrollerRef: RefObject<HTMLElement | null>;
-  keyboard: KeyboardDelegate<State>;
-}>;
-
 export type FunKeyboardProps<State> = Readonly<{
-  scrollerRef: React.RefObject<HTMLElement | null>;
+  scrollerRef: RefObject<HTMLElement | null>;
   keyboard: KeyboardDelegate<State>;
   onStateChange: (state: State) => void;
   children: ReactNode;
@@ -39,7 +33,7 @@ export type FunKeyboardProps<State> = Readonly<{
 
 export function FunKeyboard<State>(
   props: FunKeyboardProps<State>
-): React.JSX.Element {
+): JSX.Element {
   const keyboardRef = useRef(props.keyboard);
   useEffect(() => {
     keyboardRef.current = props.keyboard;
@@ -140,7 +134,7 @@ export function FunKeyboard<State>(
       };
     }
 
-    const onKeyDown = createKeybindingsHandler({
+    const scrollerKeybindings = tinykeys(scroller, {
       ArrowLeft: wrap(() => getKeyboard().onArrowLeft(currentState)),
       ArrowRight: wrap(() => getKeyboard().onArrowRight(currentState)),
       ArrowUp: wrap(() => getKeyboard().onArrowUp(currentState)),
@@ -155,12 +149,11 @@ export function FunKeyboard<State>(
 
     scroller.addEventListener('focusin', onFocusIn);
     scroller.addEventListener('focusout', onFocusOut);
-    scroller.addEventListener('keydown', onKeyDown);
 
     return () => {
       scroller.removeEventListener('focusin', onFocusIn);
       scroller.removeEventListener('focusout', onFocusOut);
-      scroller.removeEventListener('keydown', onKeyDown);
+      scrollerKeybindings();
     };
   }, [props.scrollerRef]);
 

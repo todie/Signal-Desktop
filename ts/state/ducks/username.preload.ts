@@ -10,7 +10,7 @@ import {
   ConfirmUsernameResult,
 } from '../../types/Username.std.ts';
 import * as usernameServices from '../../services/username.preload.ts';
-import { storageServiceUploadJob } from '../../services/storage.preload.ts';
+import { runStorageServiceUploadJob } from '../../services/storage.preload.ts';
 import type { ReserveUsernameResultType } from '../../services/username.preload.ts';
 import { missingCaseError } from '../../util/missingCaseError.std.ts';
 import { sleep } from '../../util/sleep.std.ts';
@@ -100,10 +100,10 @@ type ConfirmUsernameActionType = ReadonlyDeep<
   PromiseAction<typeof CONFIRM_USERNAME, ConfirmUsernameResult>
 >;
 type DeleteUsernameActionType = ReadonlyDeep<
-  PromiseAction<typeof DELETE_USERNAME, void>
+  PromiseAction<typeof DELETE_USERNAME>
 >;
 type ResetUsernameLinkActionType = ReadonlyDeep<
-  PromiseAction<typeof RESET_USERNAME_LINK, void>
+  PromiseAction<typeof RESET_USERNAME_LINK>
 >;
 
 export type UsernameActionType = ReadonlyDeep<
@@ -137,7 +137,7 @@ export const useUsernameActions = (): BoundActionCreatorsMapObject<
   typeof actions
 > => useBoundActions(actions);
 
-export function setUsernameEditState(
+function setUsernameEditState(
   editState: UsernameEditState
 ): SetUsernameEditStateActionType {
   return {
@@ -146,19 +146,19 @@ export function setUsernameEditState(
   };
 }
 
-export function openUsernameReservationModal(): OpenUsernameReservationModalActionType {
+function openUsernameReservationModal(): OpenUsernameReservationModalActionType {
   return {
     type: OPEN_USERNAME_RESERVATION_MODAL,
   };
 }
 
-export function closeUsernameReservationModal(): CloseUsernameReservationModalActionType {
+function closeUsernameReservationModal(): CloseUsernameReservationModalActionType {
   return {
     type: CLOSE_USERNAME_RESERVATION_MODAL,
   };
 }
 
-export function setUsernameReservationError(
+function setUsernameReservationError(
   error: UsernameReservationError | undefined
 ): SetUsernameReservationErrorActionType {
   return {
@@ -167,7 +167,7 @@ export function setUsernameReservationError(
   };
 }
 
-export function clearUsernameReservation(): ClearUsernameReservationActionType {
+function clearUsernameReservation(): ClearUsernameReservationActionType {
   return {
     type: CLEAR_USERNAME_RESERVATION,
   };
@@ -182,7 +182,7 @@ export type ReserveUsernameOptionsType = ReadonlyDeep<{
   delay?: number;
 }>;
 
-export function reserveUsername({
+function reserveUsername({
   nickname,
   customDiscriminator,
   doReserveUsername = usernameServices.reserveUsername,
@@ -231,7 +231,7 @@ export type ConfirmUsernameOptionsType = ReadonlyDeep<{
   doConfirmUsername?: typeof usernameServices.confirmUsername;
 }>;
 
-export function confirmUsername({
+function confirmUsername({
   doConfirmUsername = usernameServices.confirmUsername,
 }: ConfirmUsernameOptionsType = {}): ThunkAction<
   void,
@@ -261,7 +261,7 @@ export type DeleteUsernameOptionsType = ReadonlyDeep<{
   username?: string;
 }>;
 
-export function deleteUsername({
+function deleteUsername({
   doDeleteUsername = usernameServices.deleteUsername,
   username: defaultUsername,
 }: DeleteUsernameOptionsType = {}): ThunkAction<
@@ -298,7 +298,7 @@ export type ResetUsernameLinkOptionsType = ReadonlyDeep<{
   doResetLink?: typeof usernameServices.resetLink;
 }>;
 
-export function resetUsernameLink({
+function resetUsernameLink({
   doResetLink = usernameServices.resetLink,
 }: ResetUsernameLinkOptionsType = {}): ThunkAction<
   void,
@@ -328,7 +328,7 @@ function markCompletedUsernameOnboarding(): ThunkAction<
     await itemStorage.put('hasCompletedUsernameOnboarding', true);
     const me = window.ConversationController.getOurConversationOrThrow();
     me.captureChange('usernameOnboarding');
-    storageServiceUploadJob({ reason: 'markCompletedUsernameOnboarding' });
+    runStorageServiceUploadJob({ reason: 'markCompletedUsernameOnboarding' });
   };
 }
 
@@ -350,7 +350,7 @@ function setUsernameLinkColor(
     await itemStorage.put('usernameLinkColor', color);
     const me = window.ConversationController.getOurConversationOrThrow();
     me.captureChange('usernameLinkColor');
-    storageServiceUploadJob({ reason: 'setUsernameLinkColor' });
+    runStorageServiceUploadJob({ reason: 'setUsernameLinkColor' });
   };
 }
 

@@ -21,9 +21,7 @@ import { bidiIsolate, bidiStrip } from './unicodeBidi.std.ts';
 
 const log = createLogger('setupI18nMain');
 
-export function isLocaleMessageType(
-  value: unknown
-): value is LocaleMessageType {
+function isLocaleMessageType(value: unknown): value is LocaleMessageType {
   return (
     typeof value === 'object' &&
     value != null &&
@@ -37,7 +35,7 @@ export type SetupI18nOptionsType = Readonly<{
   getHourCyclePreference: LocalizerType['getHourCyclePreference'];
 }>;
 
-export function createCachedIntl(
+function createCachedIntl(
   locale: string,
   icuMessages: Record<string, string>,
   { renderEmojify }: SetupI18nOptionsType

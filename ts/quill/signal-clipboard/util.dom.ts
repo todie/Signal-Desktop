@@ -78,9 +78,9 @@ function getStringFromNode(
   }
   const element = node;
 
-  const emojiValue = getFunEmojiElementValue(element);
-  if (emojiValue != null) {
-    return emojiValue;
+  const emoji = getFunEmojiElementValue(element);
+  if (emoji != null) {
+    return emoji;
   }
 
   // Sometimes we need to add multiple newlines to represent nested divs, and other times
@@ -192,7 +192,8 @@ function getRangeWithContainer(range: Range): Node {
     return fragment;
   }
 
-  currentNode = startContainer.parentElement as HTMLElement;
+  // oxlint-disable-next-line typescript/no-non-null-assertion
+  currentNode = startContainer.parentElement!;
   while (
     currentNode &&
     CONTAINER_CLASSES.every(item => !currentNode?.classList.contains(item))

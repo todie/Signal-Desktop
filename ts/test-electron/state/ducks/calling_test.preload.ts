@@ -39,7 +39,6 @@ import {
   GroupCallJoinState,
 } from '../../../types/Calling.std.ts';
 import { CallMode } from '../../../types/CallDisposition.std.ts';
-import { generateAci } from '../../../types/ServiceId.std.ts';
 import { getDefaultConversation } from '../../../test-helpers/getDefaultConversation.std.ts';
 import type { UnwrapPromise } from '../../../types/Util.std.ts';
 import {
@@ -51,6 +50,8 @@ import { strictAssert } from '../../../util/assert.std.ts';
 import { callLinkRefreshJobQueue } from '../../../jobs/callLinkRefreshJobQueue.preload.ts';
 import { CALL_LINK_DEFAULT_STATE } from '../../../util/callLinks.std.ts';
 import { DataWriter } from '../../../sql/Client.preload.ts';
+import { generateAci } from '../../../test-helpers/serviceIdUtils.std.ts';
+import { Emoji } from '../../../axo/emoji.std.ts';
 
 const { cloneDeep, noop } = lodash;
 
@@ -210,7 +211,7 @@ describe('calling duck', () => {
   const ourAci = generateAci();
 
   const getEmptyRootState = (): StateType => {
-    const rootState = rootReducer(undefined, noopAction());
+    const rootState = rootReducer(undefined, noopAction('getEmptyRootState'));
     return {
       ...rootState,
       user: {
@@ -1591,7 +1592,7 @@ describe('calling duck', () => {
         return { dispatch };
       };
 
-      it('reads the link and dispatches START_CALL_LINK_LOBBY', async function (this: Mocha.Context) {
+      it('reads the link and dispatches START_CALL_LINK_LOBBY', async () => {
         const { roomId, rootKey } = FAKE_CALL_LINK;
         const { dispatch } = await doAction({ rootKey });
 
@@ -1649,7 +1650,7 @@ describe('calling duck', () => {
         return { dispatch };
       };
 
-      it('fails', async function (this: Mocha.Context) {
+      it('fails', async () => {
         const { roomId, rootKey } = FAKE_CALL_LINK;
         const { dispatch } = await doAction({ rootKey });
 
@@ -1886,7 +1887,7 @@ describe('calling duck', () => {
           {
             timestamp: NOW.getTime(),
             demuxId: 123,
-            value: '❤️',
+            value: Emoji.HEART,
           },
         ]);
 
@@ -1899,7 +1900,7 @@ describe('calling duck', () => {
           reactions: [
             {
               demuxId: 456,
-              value: '🎉',
+              value: Emoji.TADA,
             },
           ],
         });
@@ -1913,12 +1914,12 @@ describe('calling duck', () => {
           {
             timestamp: NOW.getTime(),
             demuxId: 123,
-            value: '❤️',
+            value: Emoji.HEART,
           },
           {
             timestamp: secondDate.getTime(),
             demuxId: 456,
-            value: '🎉',
+            value: Emoji.TADA,
           },
         ]);
       });
@@ -1930,11 +1931,11 @@ describe('calling duck', () => {
           reactions: [
             {
               demuxId: 123,
-              value: '❤️',
+              value: Emoji.HEART,
             },
             {
               demuxId: 456,
-              value: '🎉',
+              value: Emoji.TADA,
             },
           ],
         });
@@ -1948,12 +1949,12 @@ describe('calling duck', () => {
           {
             timestamp: NOW.getTime(),
             demuxId: 123,
-            value: '❤️',
+            value: Emoji.HEART,
           },
           {
             timestamp: NOW.getTime(),
             demuxId: 456,
-            value: '🎉',
+            value: Emoji.TADA,
           },
         ]);
       });
@@ -1992,7 +1993,7 @@ describe('calling duck', () => {
         const action = getAction({
           callMode: CallMode.Group,
           conversationId: 'fake-group-call-conversation-id',
-          value: '❤️',
+          value: Emoji.HEART,
         });
         const result = reducer(getState().calling, action);
 
@@ -2004,7 +2005,7 @@ describe('calling duck', () => {
           {
             timestamp: NOW.getTime(),
             demuxId: 1,
-            value: '❤️',
+            value: Emoji.HEART,
           },
         ]);
       });

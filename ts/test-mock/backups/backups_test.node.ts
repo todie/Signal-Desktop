@@ -14,7 +14,6 @@ import { expect } from 'playwright/test';
 import * as Bytes from '../../Bytes.std.ts';
 import { generateStoryDistributionId } from '../../types/StoryDistributionId.std.ts';
 import { MY_STORY_ID } from '../../types/Stories.std.ts';
-import { generateAci } from '../../types/ServiceId.std.ts';
 import { generateBackup } from '../../test-helpers/generateBackup.node.ts';
 import { IMAGE_JPEG } from '../../types/MIME.std.ts';
 import { uuidToBytes } from '../../util/uuidToBytes.std.ts';
@@ -25,11 +24,14 @@ import {
   getMessageInTimelineByTimestamp,
   sendTextMessage,
   sendReaction,
+  getLoadedImagesInside,
 } from '../helpers.node.ts';
 import { toBase64 } from '../../Bytes.std.ts';
 import { strictAssert } from '../../util/assert.std.ts';
 import { BackupLevel } from '../../services/backups/types.std.ts';
 import { generateNotificationProfileId } from '../../types/NotificationProfile-node.node.ts';
+import { generateAci } from '../../test-helpers/serviceIdUtils.std.ts';
+import { Emoji } from '../../axo/emoji.std.ts';
 
 export const debug = createDebug('mock:test:backups');
 
@@ -69,7 +71,7 @@ describe('backups', function (this: Mocha.Suite) {
 
   async function generateTestDataThenRestoreBackup(
     thisVal: Mocha.Context,
-    exportBackupFn: () => void,
+    exportBackupFn: () => Promise<void>,
     getBootstrapLinkParams: () => LinkOptionsType
   ) {
     let state = StorageState.getEmpty();
@@ -258,7 +260,7 @@ describe('backups', function (this: Mocha.Suite) {
           targetMessageTimestamp: ourTimestamp,
           reactionTimestamp,
           desktop,
-          emoji: '👍',
+          emoji: Emoji.getDefaultVariant(Emoji.THUMBS_UP),
         })
       );
     }
@@ -285,9 +287,9 @@ describe('backups', function (this: Mocha.Suite) {
     let catPlaintextHash: string;
     {
       const window = await app.getWindow();
-      await getMessageInTimelineByTimestamp(window, catTimestamp)
-        .locator('img')
-        .waitFor();
+      await getLoadedImagesInside(
+        getMessageInTimelineByTimestamp(window, catTimestamp)
+      ).waitFor();
 
       const [catMessage] = await app.getMessagesBySentAt(catTimestamp);
       const [image] = catMessage?.attachments ?? [];
@@ -324,7 +326,7 @@ describe('backups', function (this: Mocha.Suite) {
         await snapshot('styled bubbles');
 
         debug('Waiting for unread count');
-        const unreadCount = await leftPane
+        const unreadCount = leftPane
           .locator(
             '.module-conversation-list__item--contact-or-conversation__unread-indicator.module-conversation-list__item--contact-or-conversation__unread-indicator--unread-messages'
           )
@@ -356,11 +358,13 @@ describe('backups', function (this: Mocha.Suite) {
         await window.locator('.module-Modal__close-button').click();
 
         debug('Switching to settings tab');
-        await window.getByTestId('NavTabsItem--Settings').click();
+        await window.getByRole('tab', { name: 'Settings' }).click();
 
         debug('Opening Notification Profiles list screen');
         await window.getByRole('button', { name: 'Notifications' }).click();
-        await window.getByTestId('ManageNotificationProfiles').click();
+        await window
+          .getByRole('button', { name: 'Notification profiles' })
+          .click();
         await expect(
           window.getByTestId(`EditProfile--${notificationProfileName1}`)
         ).toBeVisible();
@@ -439,7 +443,7 @@ describe('backups', function (this: Mocha.Suite) {
     );
   });
 
-  it('imports ephemeral backup', async function () {
+  it('imports ephemeral backup', async () => {
     const ephemeralBackupKey = randomBytes(32);
     const cdnKey = randomBytes(16).toString('hex');
 
@@ -488,7 +492,7 @@ describe('backups', function (this: Mocha.Suite) {
     await window.locator('.module-message >> "Message 33"').waitFor();
   });
 
-  it('handles remote ephemeral backup cancellation', async function () {
+  it('handles remote ephemeral backup cancellation', async () => {
     const ephemeralBackupKey = randomBytes(32);
 
     const { phone, server } = bootstrap;
@@ -502,9 +506,9 @@ describe('backups', function (this: Mocha.Suite) {
     });
 
     const window = await app.getWindow();
-    const modal = window.getByTestId(
-      'ConfirmationDialog.InstallScreenBackupImportStep.error'
-    );
+    const modal = window.getByRole('alertdialog', {
+      name: 'Error transferring your messages',
+    });
 
     await modal.waitFor();
 

@@ -176,7 +176,10 @@ export function setup(
           const json: unknown = JSON.parse(dumpToJSONString(content));
           const dump = parseUnknown(dumpSchema, json);
 
-          if (dump.crash_info?.type === 'Simulated Exception') {
+          if (
+            dump.crash_info?.type === 'Simulated Exception' ||
+            dump.crash_info?.type === 'DUMP_REQUESTED'
+          ) {
             return undefined;
           }
 
@@ -186,7 +189,7 @@ export function setup(
             }
 
             // Node.js Addons are useful
-            if (/\.node$/.test(filename)) {
+            if (filename.endsWith('.node')) {
               return true;
             }
 

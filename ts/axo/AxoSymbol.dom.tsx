@@ -1,131 +1,160 @@
 // Copyright 2025 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
-import type { FC } from 'react';
-import React, { memo, useMemo } from 'react';
+import type { CSSProperties, FC, JSX } from 'react';
+import { memo, useMemo } from 'react';
 import { Direction } from 'radix-ui';
 import { VisuallyHidden } from 'react-aria';
-import type { TailwindStyles } from './tw.dom.tsx';
-import { tw } from './tw.dom.tsx';
 import {
-  getAxoSymbolIcon,
-  getAxoSymbolInlineGlyph,
+  _getAxoSymbolIcon,
+  _getAxoSymbolInlineGlyph,
 } from './_internal/AxoSymbolDefs.generated.std.ts';
-import type {
-  AxoSymbolIconName,
-  AxoSymbolInlineGlyphName,
-} from './_internal/AxoSymbolDefs.generated.std.ts';
+import type { _AxoSymbolName } from './_internal/AxoSymbolDefs.generated.std.ts';
 
 const { useDirection } = Direction;
 
-const Namespace = 'AxoSymbol';
-
+/**
+ * Renders symbols from the Axo symbol font — either as a fixed-size block icon
+ * or as an inline glyph that flows with surrounding text.
+ *
+ * @example Anatomy
+ * ```tsx
+ * // Fixed-size icon, e.g. in buttons or list items
+ * <AxoSymbol.Icon size={20} symbol="check" label={null} />
+ *
+ * // Inline glyph, e.g. directional arrows inside button labels
+ * <AxoSymbol.InlineGlyph symbol="arrow-end" label={null} />
+ * ```
+ */
 export namespace AxoSymbol {
-  const symbolStyles = tw('font-symbols select-none');
-  const labelStyles = tw('select-none');
-  export type Weight = 300 | 400 | 700;
-  const WeightStyles = {
-    300: tw('font-light'),
-    400: tw(),
-    700: tw('font-semibold'),
-  } as const satisfies Record<Weight, TailwindStyles>;
+  export type Name = _AxoSymbolName;
 
-  function useRenderSymbol(
-    glyph: string,
-    label: string | null,
-    weight: Weight
-  ): React.JSX.Element {
+  export type Weight = 300 | 400 | 600;
+
+  /**
+   * useRenderSymbol()
+   * --------------------------------------
+   */
+
+  /** @internal */
+  function useRenderSymbol(glyph: string, label: string | null): JSX.Element {
     return useMemo(() => {
       return (
         <>
-          <span aria-hidden className={tw(symbolStyles, WeightStyles[weight])}>
+          <span aria-hidden className="axo-symbol-glyph">
             {glyph}
           </span>
           {label != null && (
-            <VisuallyHidden className={labelStyles}>{label}</VisuallyHidden>
+            <VisuallyHidden className="axo-symbol-label">
+              {label}
+            </VisuallyHidden>
           )}
         </>
       );
-    }, [glyph, label, weight]);
+    }, [glyph, label]);
   }
 
   /**
-   * Component: <AxoSymbol.InlineGlyph>
-   * --------------------------------------
+   * <AxoSymbol.InlineGlyph>
+   * --------------------------------------------------------------------------
    */
 
-  export type InlineGlyphName = AxoSymbolInlineGlyphName;
-
   export type InlineGlyphProps = Readonly<{
-    symbol: InlineGlyphName;
+    /** The icon to render. */
+    symbol: Name;
+    /**
+     * Accessible label for screen readers. Pass `null` if the glyph is purely
+     * decorative and the surrounding context (Ex: a button's aria-label) already
+     * conveys the meaning.
+     */
     label: string | null;
+    /** Prefer the -wide variants of glyphs (if available) */
+    preferWide?: boolean;
   }>;
 
+  /**
+   * An inline symbol that flows with surrounding text. Use when you want to
+   * match the font size and don't care about the width of the icon.
+   *
+   * @example Within a labeled element
+   * ```tsx
+   * <button>
+   *   Expand items
+   *   <AxoSymbol.InlineGlyph symbol="arrow-down" label={null} />
+   * </button>
+   * ```
+   *
+   * @example Outside a labeled element
+   * ```tsx
+   * <p>
+   *   {"Then click on the "}
+   *   <AxoSymbol.InlineGlyph symbol="arrow-[end]" label="Next page" />
+   *   {" button"}
+   * </p>
+   * ```
+   */
   export const InlineGlyph: FC<InlineGlyphProps> = memo(props => {
     const direction = useDirection();
-    const glyph = getAxoSymbolInlineGlyph(props.symbol, direction);
-    const content = useRenderSymbol(glyph, props.label, 400);
+    const glyph = props.preferWide
+      ? _getAxoSymbolIcon(props.symbol, direction)
+      : _getAxoSymbolInlineGlyph(props.symbol, direction);
+    const content = useRenderSymbol(glyph, props.label);
     return content;
   });
 
-  InlineGlyph.displayName = `${Namespace}.InlineGlyph`;
+  InlineGlyph.displayName = 'AxoSymbol.InlineGlyph';
 
   /**
-   * Component: <AxoSymbol.Icon>
-   * --------------------------------------
+   * <AxoSymbol.Icon>
+   * --------------------------------------------------------------------------
    */
 
-  export type IconName = AxoSymbolIconName;
+  /** Available icon sizes in pixels. */
   export type IconSize = 12 | 14 | 16 | 18 | 20 | 24 | 36 | 48;
 
-  type IconSizeConfig = { size: number; fontSize: number };
-
-  const IconSizes: Record<IconSize, IconSizeConfig> = {
-    12: { size: 12, fontSize: 10 },
-    14: { size: 14, fontSize: 12 },
-    16: { size: 16, fontSize: 14 },
-    18: { size: 18, fontSize: 16 },
-    20: { size: 20, fontSize: 18 },
-    24: { size: 24, fontSize: 22 },
-    36: { size: 36, fontSize: 34 },
-    48: { size: 48, fontSize: 44 },
-  };
-
-  export function _getAllIconSizes(): ReadonlyArray<IconSize> {
-    return Object.keys(IconSizes).map(size => Number(size) as IconSize);
-  }
-
   export type IconProps = Readonly<{
+    /** Size of the icon in pixels. */
     size: IconSize;
-    symbol: IconName;
+    /** The icon to render. Automatically mirrored in RTL layouts. */
+    symbol: Name;
+    /**
+     * Accessible label for screen readers. Pass `null` if the icon is purely
+     * decorative and the surrounding context (Ex: a button's aria-label) already
+     * conveys the meaning.
+     */
     label: string | null;
-    weight?: Weight;
   }>;
 
-  const iconStyles = tw(
-    'inline-flex size-[1em] shrink-0 items-center justify-center align-middle leading-none'
-  );
-
+  /**
+   * A fixed-size icon. Prefer using this when the width and height both matter.
+   *
+   * @example Within a labeled element
+   * ```tsx
+   * <button aria-label="Expand items">
+   *   <AxoSymbol.Icon size={20} symbol="arrow-down" label={null} />
+   * </button>
+   * ```
+   *
+   * @example Outside a labeled element
+   * ```tsx
+   * <AxoSymbol.Icon size={20} symbol="shield-check" label="Verified" />
+   * ```
+   */
   export const Icon: FC<IconProps> = memo(props => {
-    const config = IconSizes[props.size];
+    const { size } = props;
     const direction = useDirection();
-    const weight = props.weight ?? 400;
-    const glyph = getAxoSymbolIcon(props.symbol, direction);
-    const content = useRenderSymbol(glyph, props.label, weight);
+    const glyph = _getAxoSymbolIcon(props.symbol, direction);
+    const content = useRenderSymbol(glyph, props.label);
 
-    const style = useMemo(() => {
-      return {
-        width: config.size,
-        height: config.size,
-        fontSize: config.fontSize,
-      };
-    }, [config]);
+    const style = useMemo((): CSSProperties => {
+      return { fontSize: size };
+    }, [size]);
 
     return (
-      <span className={iconStyles} style={style}>
+      <span className="axo-symbol-icon" style={style}>
         {content}
       </span>
     );
   });
 
-  Icon.displayName = `${Namespace}.Icon`;
+  Icon.displayName = 'AxoSymbol.Icon';
 }

@@ -1,7 +1,7 @@
 // Copyright 2021 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import React from 'react';
+import type { JSX } from 'react';
 
 import { action } from '@storybook/addon-actions';
 
@@ -12,6 +12,7 @@ import { AvatarModalButtons } from './AvatarModalButtons.dom.tsx';
 const { i18n } = window.SignalContext;
 
 const createProps = (overrideProps: Partial<PropsType> = {}): PropsType => ({
+  isInsideDialog: false,
   hasChanges: Boolean(overrideProps.hasChanges),
   i18n,
   onCancel: action('onCancel'),
@@ -22,7 +23,7 @@ export default {
   title: 'Components/AvatarModalButtons',
 } satisfies Meta<PropsType>;
 
-export function HasChanges(): React.JSX.Element {
+export function HasChanges(): JSX.Element {
   return (
     <AvatarModalButtons
       {...createProps({
@@ -32,6 +33,6 @@ export function HasChanges(): React.JSX.Element {
   );
 }
 
-export function NoChanges(): React.JSX.Element {
+export function NoChanges(): JSX.Element {
   return <AvatarModalButtons {...createProps()} />;
 }

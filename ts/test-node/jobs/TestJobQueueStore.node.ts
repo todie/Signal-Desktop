@@ -1,5 +1,6 @@
 // Copyright 2021 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
+// oxlint-disable max-classes-per-file
 
 import EventEmitter, { once } from 'node:events';
 
@@ -10,8 +11,8 @@ import { drop } from '../../util/drop.std.ts';
 export class TestJobQueueStore implements JobQueueStore {
   events = new EventEmitter();
 
-  #openStreams = new Set<string>();
-  #pipes = new Map<string, Pipe>();
+  readonly #openStreams = new Set<string>();
+  readonly #pipes = new Map<string, Pipe>();
 
   storedJobs: Array<StoredJob> = [];
 
@@ -79,10 +80,9 @@ export class TestJobQueueStore implements JobQueueStore {
   }
 }
 
-// oxlint-disable-next-line max-classes-per-file
 class Pipe implements AsyncIterable<StoredJob> {
   #queue: Array<StoredJob> = [];
-  #eventEmitter = new EventEmitter();
+  readonly #eventEmitter = new EventEmitter();
   #isLocked = false;
   #isPaused = false;
 

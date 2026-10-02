@@ -25,6 +25,7 @@ const ELECTRON_MAIN_MODULES = new Set([
   'BaseWindow',
   'BrowserView',
   'BrowserWindow',
+  'ClipboardItem',
   'contentTracing',
   'desktopCapturer',
   'dialog',
@@ -118,11 +119,9 @@ const NODE_PACKAGES = new Set([
   'enhanced-resolve',
   'enquirer',
   'execa',
-  'html-webpack-plugin',
   'http-server',
   'json-to-ast',
   'log-symbols',
-  'mini-css-extract-plugin',
   'node-gyp',
   'node-gyp-build',
   'npm-run-all',
@@ -130,12 +129,9 @@ const NODE_PACKAGES = new Set([
   'pe-library',
   'pixelmatch',
   'playwright',
-  'postcss',
   'postcss-loader',
   'prettier',
   'prettier-plugin-tailwindcss',
-  'react-devtools',
-  'react-devtools-core',
   'resolve-url-loader',
   'rolldown',
   'sass',
@@ -148,9 +144,8 @@ const NODE_PACKAGES = new Set([
   'svgo',
   'synckit',
   'tailwindcss',
-  'terser-webpack-plugin',
+  'tsdown',
   'tsx',
-  'ts-node',
   'typescript',
   'wait-on',
   'webpack',
@@ -168,10 +163,8 @@ const DOM_PACKAGES = new Set([
   '@tanstack/react-virtual',
   'blob-util',
   'blueimp-load-image',
-  'copy-text-to-clipboard',
   'dom-accessibility-api',
   'fabric',
-  'focus-trap-react',
   'radix-ui',
   'react-aria',
   'react-aria-components',
@@ -191,8 +184,6 @@ const DOM_PACKAGES = new Set([
   '@storybook/addon-toolbars',
   '@storybook/addon-viewport',
   '@storybook/addon-webpack5-compiler-swc',
-  '@storybook/csf',
-  '@storybook/preview-api',
   '@storybook/react',
   '@storybook/react-webpack5',
   '@storybook/test',
@@ -204,9 +195,6 @@ const DOM_PACKAGES = new Set([
 // Packages that can run in both browser/node
 const STD_PACKAGES = new Set([
   '@babel/core',
-  '@babel/plugin-proposal-class-properties',
-  '@babel/plugin-proposal-nullish-coalescing-operator',
-  '@babel/plugin-proposal-optional-chaining',
   '@babel/plugin-transform-runtime',
   '@babel/plugin-transform-typescript',
   '@babel/preset-react',
@@ -218,8 +206,11 @@ const STD_PACKAGES = new Set([
   '@indutny/sneequals',
   '@internationalized/date',
   '@react-types/shared',
+  '@signalapp/types',
   '@signalapp/minimask',
+  '@signalapp/parchment-cjs',
   '@signalapp/quill-cjs',
+  '@signalapp/lame',
   '@typescript-eslint/eslint-plugin',
   '@typescript-eslint/parser',
   'axe-core',
@@ -232,7 +223,6 @@ const STD_PACKAGES = new Set([
   'casual',
   'chai',
   'chai-as-promised',
-  'chalk',
   'changedpi',
   'classnames',
   'country-codes-list',
@@ -242,21 +232,19 @@ const STD_PACKAGES = new Set([
   'danger',
   'debug',
   'direction',
-  'emoji-datasource',
-  'emoji-datasource-apple',
-  'emoji-regex',
+  'emoji-regex-xs',
   'eslint',
   'eslint-plugin-better-tailwindcss',
   'filesize',
   'firstline',
   'form-data',
+  'micromatch',
   'motion',
   'motion/react',
   'fuse.js',
   'google-libphonenumber',
   'heic-convert',
   'humanize-duration',
-  'intl-tel-input',
   'js-yaml',
   'linkify-it',
   'lodash',
@@ -271,7 +259,6 @@ const STD_PACKAGES = new Set([
   'p-queue',
   'p-timeout',
   'parsecurrency',
-  'pify',
   'pino',
   'pngjs',
   'qrcode-generator',
@@ -287,8 +274,8 @@ const STD_PACKAGES = new Set([
   'sinon',
   'tinykeys',
   'type-fest',
+  'unicode-number',
   'url',
-  'urlpattern-polyfill',
   'uuid',
   'zod',
 ]);
@@ -531,15 +518,17 @@ export const enforceFileSuffix = ESLintUtils.RuleCreator.withoutDocs({
 
     return {
       Program: node => {
-        if (filename.endsWith('.d.ts')) {
+        if (/\.d\.m?ts$/.test(filename)) {
           // Skip types
           return;
         }
 
-        const match = filename.match(/\.([^.\/]+)(?:\.stories)?\.(?:ts|tsx)$/);
+        const match = filename.match(
+          /\.([^.\/]+)(?:\.stories)?\.(?:ts|tsx|js|mjs)$/
+        );
         if (match == null) {
           context.report({
-            node: node,
+            node,
             messageId: 'missingFileSuffixMustBeOneOf',
           });
           return;

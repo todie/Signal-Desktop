@@ -9,7 +9,7 @@ const log = createLogger('StartupQueue');
 
 type EntryType = Readonly<{
   value: number;
-  callback(): Promise<void>;
+  callback: () => Promise<void>;
 }>;
 
 let startupProcessingQueue: StartupQueue | undefined;
@@ -41,7 +41,7 @@ export class StartupQueue {
     for (const { callback } of values) {
       void this.#running.add(async () => {
         try {
-          return callback();
+          return await callback();
         } catch (error) {
           log.error(
             'Failed to process item due to error',

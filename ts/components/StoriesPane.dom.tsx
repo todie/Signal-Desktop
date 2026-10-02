@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import Fuse from 'fuse.js';
-import React, { useEffect, useState } from 'react';
+import type { IFuseOptions } from 'fuse.js';
+import { useEffect, useState, type JSX } from 'react';
 import classNames from 'classnames';
 
 import type {
@@ -23,7 +24,7 @@ import { StoryListItem } from './StoryListItem.dom.tsx';
 import { isNotNil } from '../util/isNotNil.std.ts';
 import { NavSidebarSearchHeader, NavSidebarEmpty } from './NavSidebar.dom.tsx';
 
-const FUSE_OPTIONS: Fuse.IFuseOptions<ConversationStoryType> = {
+const FUSE_OPTIONS: IFuseOptions<ConversationStoryType> = {
   getFn: (story, path) => {
     if (path[0] === 'searchNames' || path === 'searchNames') {
       return [story.storyView.sender.title, story.storyView.sender.name].filter(
@@ -92,7 +93,7 @@ export function StoriesPane({
   theme,
   toggleHideStories,
   viewUserStories,
-}: PropsType): React.JSX.Element {
+}: PropsType): JSX.Element {
   const [searchTerm, setSearchTerm] = useState('');
   const [isShowingHiddenStories, setIsShowingHiddenStories] = useState(false);
   const [renderedStories, setRenderedStories] =
@@ -100,6 +101,7 @@ export function StoriesPane({
 
   useEffect(() => {
     if (searchTerm) {
+      // oxlint-disable-next-line react/set-state-in-effect
       setRenderedStories(search(stories, searchTerm));
     } else {
       setRenderedStories(stories);

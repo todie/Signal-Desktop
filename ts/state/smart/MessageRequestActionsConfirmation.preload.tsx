@@ -1,7 +1,7 @@
 // Copyright 2024 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import React, { memo, useCallback, useMemo } from 'react';
+import { memo, useCallback, useMemo } from 'react';
 import { useSelector } from 'react-redux';
 import { getIntl } from '../selectors/user.std.ts';
 import { getGlobalModalsState } from '../selectors/globalModals.std.ts';
@@ -12,7 +12,7 @@ import {
   MessageRequestState,
 } from '../../components/conversation/MessageRequestActionsConfirmation.dom.tsx';
 import { useContactNameData } from '../../components/conversation/ContactName.dom.tsx';
-import { getAddedByForOurPendingInvitation } from '../../util/getAddedByForOurPendingInvitation.preload.ts';
+import { getAddedByForGroup } from '../../util/getAddedByForGroup.preload.ts';
 import { strictAssert } from '../../util/assert.std.ts';
 import { useGlobalModalActions } from '../ducks/globalModals.preload.ts';
 
@@ -31,7 +31,7 @@ export const SmartMessageRequestActionsConfirmation = memo(
     const conversation = getConversation(conversationId);
     const addedBy = useMemo(() => {
       if (conversation.type === 'group') {
-        return getAddedByForOurPendingInvitation(conversation);
+        return getAddedByForGroup(conversation);
       }
       return null;
     }, [conversation]);

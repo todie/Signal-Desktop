@@ -45,6 +45,10 @@ export type WorkerRequest = Readonly<
       type: 'close' | 'removeDB';
     }
   | {
+      type: 'walCheckpoint';
+      reason: string;
+    }
+  | {
       type: 'sqlCall:read';
       encoding: 'js';
       method: keyof ServerReadableDirectInterface;
@@ -96,6 +100,10 @@ export type WrappedWorkerResponse =
       // oxlint-disable-next-line typescript/no-explicit-any
       response: any;
     }>
+  | Readonly<{
+      type: 'walCheckpointNeeded';
+      reason: string;
+    }>
   | WrappedWorkerLogEntry;
 
 type ResponseEntry<T> = {
@@ -146,9 +154,11 @@ export class MainSQL {
   #logger?: LoggerType;
 
   // oxlint-disable-next-line typescript/no-explicit-any
-  #onResponse = new Map<number, ResponseEntry<any>>();
+  readonly #onResponse = new Map<number, ResponseEntry<any>>();
 
-  #shouldLogQueryTime: (queryName: string) => boolean;
+  #checkpointPendingReason: string | null = null;
+
+  readonly #shouldLogQueryTime: (queryName: string) => boolean;
   #shouldTrackQueryStats = false;
 
   #queryStats?: {
@@ -452,7 +462,26 @@ export class MainSQL {
     } finally {
       // oxlint-disable-next-line no-param-reassign
       entry.load -= 1;
+      this.#maybeRunCheckpoint();
     }
+  }
+
+  #maybeRunCheckpoint(): void {
+    if (!this.#isReady || this.#checkpointPendingReason == null) {
+      return;
+    }
+
+    for (const entry of this.#pool) {
+      if (entry.load !== 0) {
+        return;
+      }
+    }
+
+    const reason = this.#checkpointPendingReason;
+    this.#checkpointPendingReason = null;
+    const primary = this.#pool[0];
+    strictAssert(primary, 'Missing primary');
+    void this.#send(primary, { type: 'walCheckpoint', reason });
   }
 
   async #terminate(request: WorkerRequest): Promise<void> {
@@ -508,7 +537,7 @@ export class MainSQL {
     this.#logger?.info(
       `Top ${maxQueriesToLog} queries by cumulative duration (ms) over last ${epochDuration}ms` +
         `${epochName ? ` during '${epochName}'` : ''}: ` +
-        `${sortedByCumulativeDuration
+        sortedByCumulativeDuration
           .slice(0, maxQueriesToLog)
           .map(stats => {
             return (
@@ -518,7 +547,7 @@ export class MainSQL {
               `count: ${stats.count}`
             );
           })
-          .join(' ||| ')}` +
+          .join(' ||| ') +
         `; Total cumulative duration of all SQL queries during this epoch: ${this.#roundDuration(cumulativeDuration)}ms`
     );
   }
@@ -561,6 +590,12 @@ export class MainSQL {
         const { level, args } = wrappedResponse;
         strictAssert(this.#logger !== undefined, 'Logger not initialized');
         this.#logger[level](`MainSQL: ${format(...args)}`);
+        return;
+      }
+
+      if (wrappedResponse.type === 'walCheckpointNeeded') {
+        this.#checkpointPendingReason = wrappedResponse.reason;
+        this.#maybeRunCheckpoint();
         return;
       }
 

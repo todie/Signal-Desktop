@@ -1,6 +1,6 @@
 // Copyright 2026 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
-import React, { useCallback, useId, useState } from 'react';
+import { useCallback, useId, useState, type JSX } from 'react';
 import type { LocalizerType } from '../types/I18N.std.ts';
 import { AxoButton } from '../axo/AxoButton.dom.tsx';
 import { AxoDialog } from '../axo/AxoDialog.dom.tsx';
@@ -19,12 +19,16 @@ export type KeyTransparencyErrorDialogProps = Readonly<{
 
 export function KeyTransparencyErrorDialog(
   props: KeyTransparencyErrorDialogProps
-): React.JSX.Element {
+): JSX.Element {
   const { i18n, open, onOpenChange, onViewDebugLog, onSubmit, isSubmitting } =
     props;
 
   const debugLogCheckboxId = useId();
   const [shareDebugLog, setShareDebugLog] = useState(false);
+
+  const handleCancel = useCallback(() => {
+    onOpenChange(false);
+  }, [onOpenChange]);
 
   const handleSubmit = useCallback(() => {
     onSubmit(shareDebugLog);
@@ -35,13 +39,13 @@ export function KeyTransparencyErrorDialog(
       <AxoDialog.Content escape="cancel-is-noop" size="md">
         <AxoDialog.Body>
           <h3 className={tw('mt-6 mb-2 type-title-small')}>
-            {i18n('icu:KeyTransparencyErrorDialog__Title')}
+            {i18n('icu:KeyTransparencyErrorDialog__Title-v2')}
           </h3>
-          <p className={tw('mb-3 type-body-medium text-label-primary')}>
+          <p className={tw('mb-3 type-body-medium text-primary')}>
             <AxoDialog.Description>
               <I18n
                 i18n={i18n}
-                id="icu:KeyTransparencyErrorDialog__Description"
+                id="icu:KeyTransparencyErrorDialog__Description-v2"
               />
             </AxoDialog.Description>
           </p>
@@ -53,7 +57,7 @@ export function KeyTransparencyErrorDialog(
               onCheckedChange={setShareDebugLog}
             />
             <label htmlFor={debugLogCheckboxId} className={tw('grow truncate')}>
-              {i18n('icu:KeyTransparencyErrorDialog__ShareDebugLog__Label')}
+              {i18n('icu:KeyTransparencyErrorDialog__ShareDebugLog__Label-v2')}
             </label>
             <AxoButton.Root
               variant="subtle-primary"
@@ -68,18 +72,14 @@ export function KeyTransparencyErrorDialog(
         </AxoDialog.Body>
         <AxoDialog.Footer>
           <AxoDialog.Actions>
+            <AxoDialog.Action variant="subtle-secondary" onClick={handleCancel}>
+              {i18n('icu:KeyTransparencyErrorDialog__Cancel')}
+            </AxoDialog.Action>
             <AxoDialog.Action
-              variant="primary"
+              variant="strong-primary"
+              arrow="external-link"
               onClick={handleSubmit}
-              experimentalSpinner={
-                isSubmitting
-                  ? {
-                      'aria-label': i18n(
-                        'icu:KeyTransparencyErrorDialog__Submitting'
-                      ),
-                    }
-                  : null
-              }
+              pending={isSubmitting}
             >
               {i18n('icu:KeyTransparencyErrorDialog__Submit')}
             </AxoDialog.Action>

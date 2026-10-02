@@ -81,10 +81,10 @@ const processReceiptBatcher = createWaitBatcher({
 
     // Once we find the message, we'll group them by messageId to process
     // all receipts for a given message
-    const receiptsByMessageId: Map<
+    const receiptsByMessageId = new Map<
       string,
       Array<MessageReceiptAttributesType>
-    > = new Map();
+    >();
 
     function addReceiptAndTargetMessage(
       message: MessageModel,
@@ -302,6 +302,8 @@ const deleteSentProtoBatcher = createWaitBatcher({
       // `deleteSentProtoRecipient` has already updated the database so there
       // is no need in calling `updateConversation`
       convo.set({ shareMyPhoneNumber: undefined });
+
+      window.SignalCI?.handleEvent(`sharedPhoneNumber:${serviceId}`, null);
     }
   },
 });
@@ -395,11 +397,11 @@ const shouldDropReceipt = (
 ): boolean => {
   const { type } = receipt.receiptSync;
   switch (type) {
-    case messageReceiptTypeSchema.Enum.Delivery:
+    case messageReceiptTypeSchema.enum.Delivery:
       return false;
-    case messageReceiptTypeSchema.Enum.Read:
+    case messageReceiptTypeSchema.enum.Read:
       return !itemStorage.get('read-receipt-setting');
-    case messageReceiptTypeSchema.Enum.View:
+    case messageReceiptTypeSchema.enum.View:
       if (isStory(message)) {
         return !areStoryViewReceiptsEnabled();
       }

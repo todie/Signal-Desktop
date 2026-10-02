@@ -22,7 +22,7 @@ const rulesPath = join(__dirname, 'rules.json');
 const exceptionsPath = join(__dirname, 'exceptions.json');
 const basePath = join(__dirname, '../../..');
 
-const searchPattern = normalizePath(join(basePath, '**/*.{js,ts,tsx}'));
+const searchPattern = normalizePath(join(basePath, '**/*.{js,mjs,ts,tsx}'));
 
 const THIRD_PARTY_PATHS = ['node_modules/', 'js/', 'components/'];
 
@@ -75,13 +75,8 @@ const excludedFilesRegexp = RegExp(
     '^js/components.js',
     '^js/curve/',
     '^js/util_worker.js',
-    '^libtextsecure/test/test.js',
-    '^test/test.js',
     '^ts/workers/heicConverter.bundle.js',
     '^ts/sql/mainWorker.bundle.js',
-
-    // Copied from dependency
-    '^js/WebAudioRecorderMp3.js',
 
     // Test files
     '^libtextsecure/test/.+',
@@ -206,7 +201,6 @@ const excludedFilesRegexp = RegExp(
     '^node_modules/hpack\\.js/.+',
     '^node_modules/http-proxy-middlewar/.+',
     '^node_modules/icss-utils/.+',
-    '^node_modules/intl-tel-input/examples/.+',
     '^node_modules/istanbul.+',
     '^node_modules/jimp/.+',
     '^node_modules/jquery/.+',
@@ -241,8 +235,6 @@ const excludedFilesRegexp = RegExp(
     '^node_modules/prop-types/.+',
     '^node_modules/ramda/.+',
     '^node_modules/rambda/.+',
-    '^node_modules/react-devtools/.+',
-    '^node_modules/react-devtools-core/.+',
     '^node_modules/react-dev-utils/.+',
     '^node_modules/react-docgen/.+',
     '^node_modules/react-error-overlay/.+',
@@ -274,7 +266,6 @@ const excludedFilesRegexp = RegExp(
     '^node_modules/to-ast/.+',
     '^node_modules/trough/.+',
     '^node_modules/ts-loader/.+',
-    '^node_modules/ts-node/.+',
     '^node_modules/tweetnacl/.+',
     '^node_modules/typed-scss-modules/.+',
     '^node_modules/typescript/.+',
@@ -289,8 +280,6 @@ const excludedFilesRegexp = RegExp(
     '^node_modules/xml-parse-from-string/.+',
     '^node_modules/xmlbuilder/.+',
     '^node_modules/xmldom/.+',
-    '^node_modules/yargs-unparser/',
-    '^node_modules/yargs/.+',
     '^node_modules/find-yarn-workspace-root/.+',
     '^node_modules/unzipper/node_modules/bluebird/.+',
     '^node_modules/update-notifier/.+',
@@ -324,7 +313,6 @@ const excludedFilesRegexp = RegExp(
     '^node_modules/fork-ts-checker-webpack-plugin/.+',
     '^node_modules/gzip-size/.+',
     '^node_modules/markdown-to-jsx/.+',
-    '^node_modules/mini-css-extract-plugin/.+',
     '^node_modules/polished.+',
     '^node_modules/prismjs/.+',
     '^node_modules/react-draggable/.+',

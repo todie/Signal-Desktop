@@ -1,7 +1,8 @@
 // Copyright 2020 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import * as React from 'react';
+import type { JSX } from 'react';
+
 import { action } from '@storybook/addon-actions';
 import type { Meta } from '@storybook/react';
 import type { PropsData as MessageDataPropsType } from './Message.dom.tsx';
@@ -37,8 +38,12 @@ const defaultMessage: MessageDataPropsType = {
   isPinned: false,
   isSelected: false,
   isSelectMode: false,
+  isSignalConversation: false,
   isSMS: false,
   isSpoilerExpanded: {},
+  isTargeted: false,
+  isTargetedCounter: null,
+  isTargetedSource: null,
   isVoiceMessagePlayed: false,
   previews: [],
   readStatus: ReadStatus.Read,
@@ -64,6 +69,7 @@ export default {
         isOutgoingKeyError: false,
         isUnidentifiedDelivery: false,
         status: SendStatus.Delivered,
+        statusTimestamp: Date.now(),
       },
     ],
     errors: [],
@@ -74,7 +80,6 @@ export default {
     getPreferredBadge: () => getFakeBadge(),
     i18n,
     platform: 'darwin',
-    interactionMode: 'keyboard',
     theme: ThemeType.light,
 
     toggleSafetyNumberModal: action('toggleSafetyNumberModal'),
@@ -108,7 +113,7 @@ export default {
   },
 } satisfies Meta<Props>;
 
-export function DeliveredIncoming(args: Props): React.JSX.Element {
+export function DeliveredIncoming(args: Props): JSX.Element {
   return (
     <MessageDetail
       {...args}
@@ -127,7 +132,7 @@ export function DeliveredIncoming(args: Props): React.JSX.Element {
   );
 }
 
-export function DeliveredOutgoing(args: Props): React.JSX.Element {
+export function DeliveredOutgoing(args: Props): JSX.Element {
   return (
     <MessageDetail
       {...args}
@@ -140,7 +145,7 @@ export function DeliveredOutgoing(args: Props): React.JSX.Element {
   );
 }
 
-export function MessageStatuses(args: Props): React.JSX.Element {
+export function MessageStatuses(args: Props): JSX.Element {
   return (
     <MessageDetail
       {...args}
@@ -150,8 +155,10 @@ export function MessageStatuses(args: Props): React.JSX.Element {
             title: 'Max',
           }),
           isOutgoingKeyError: false,
-          isUnidentifiedDelivery: false,
+          isUnidentifiedDelivery: true,
           status: SendStatus.Sent,
+          // oxlint-disable-next-line react/purity
+          statusTimestamp: Date.now(),
         },
         {
           ...getDefaultConversation({
@@ -160,14 +167,18 @@ export function MessageStatuses(args: Props): React.JSX.Element {
           isOutgoingKeyError: false,
           isUnidentifiedDelivery: false,
           status: SendStatus.Pending,
+          // oxlint-disable-next-line react/purity
+          statusTimestamp: Date.now(),
         },
         {
           ...getDefaultConversation({
             title: 'Terry',
           }),
           isOutgoingKeyError: false,
-          isUnidentifiedDelivery: false,
+          isUnidentifiedDelivery: true,
           status: SendStatus.Failed,
+          // oxlint-disable-next-line react/purity
+          statusTimestamp: Date.now(),
         },
         {
           ...getDefaultConversation({
@@ -176,14 +187,18 @@ export function MessageStatuses(args: Props): React.JSX.Element {
           isOutgoingKeyError: false,
           isUnidentifiedDelivery: false,
           status: SendStatus.Delivered,
+          // oxlint-disable-next-line react/purity
+          statusTimestamp: Date.now(),
         },
         {
           ...getDefaultConversation({
             title: 'Nikki',
           }),
           isOutgoingKeyError: false,
-          isUnidentifiedDelivery: false,
+          isUnidentifiedDelivery: true,
           status: SendStatus.Read,
+          // oxlint-disable-next-line react/purity
+          statusTimestamp: Date.now(),
         },
       ]}
       message={{
@@ -195,7 +210,7 @@ export function MessageStatuses(args: Props): React.JSX.Element {
   );
 }
 
-export function NotDelivered(args: Props): React.JSX.Element {
+export function NotDelivered(args: Props): JSX.Element {
   return (
     <MessageDetail
       {...args}
@@ -210,7 +225,7 @@ export function NotDelivered(args: Props): React.JSX.Element {
   );
 }
 
-export function NoContacts(args: Props): React.JSX.Element {
+export function NoContacts(args: Props): JSX.Element {
   return (
     <MessageDetail
       {...args}
@@ -224,7 +239,7 @@ export function NoContacts(args: Props): React.JSX.Element {
   );
 }
 
-export function AllErrors(args: Props): React.JSX.Element {
+export function AllErrors(args: Props): JSX.Element {
   return (
     <MessageDetail
       {...args}
@@ -242,6 +257,8 @@ export function AllErrors(args: Props): React.JSX.Element {
           isOutgoingKeyError: true,
           isUnidentifiedDelivery: false,
           status: SendStatus.Failed,
+          // oxlint-disable-next-line react/purity
+          statusTimestamp: Date.now(),
         },
         {
           ...getDefaultConversation({
@@ -256,6 +273,8 @@ export function AllErrors(args: Props): React.JSX.Element {
           isOutgoingKeyError: false,
           isUnidentifiedDelivery: true,
           status: SendStatus.Failed,
+          // oxlint-disable-next-line react/purity
+          statusTimestamp: Date.now(),
         },
         {
           ...getDefaultConversation({
@@ -264,6 +283,8 @@ export function AllErrors(args: Props): React.JSX.Element {
           isOutgoingKeyError: true,
           isUnidentifiedDelivery: true,
           status: SendStatus.Failed,
+          // oxlint-disable-next-line react/purity
+          statusTimestamp: Date.now(),
         },
       ]}
     />

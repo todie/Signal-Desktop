@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { ReactElement } from 'react';
-import React, { useMemo, useRef } from 'react';
+import { useMemo, useRef } from 'react';
 import qrcode from 'qrcode-generator';
 import { getEnvironment, Environment } from '../environment.std.ts';
 
@@ -54,6 +54,7 @@ export function QrCode(props: PropsType): ReactElement {
   };
 
   return (
+    // oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
     <img
       alt={alt}
       className={className}

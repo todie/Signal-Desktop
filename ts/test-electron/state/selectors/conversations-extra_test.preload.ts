@@ -15,11 +15,11 @@ import { reducer as rootReducer } from '../../../state/reducer.preload.ts';
 import { getDefaultConversation } from '../../../test-helpers/getDefaultConversation.std.ts';
 import { getEmptyState } from '../../../state/ducks/conversations.preload.ts';
 import { getByDistributionListConversationsStoppingSend } from '../../../state/selectors/conversations-extra.preload.ts';
-import { generateAci } from '../../../types/ServiceId.std.ts';
 import { generateStoryDistributionId } from '../../../types/StoryDistributionId.std.ts';
 import { noopAction } from '../../../state/ducks/noop.std.ts';
 import { ID_LENGTH } from '../../../types/groups.std.ts';
 import { ConversationVerificationState } from '../../../state/ducks/conversationsEnums.std.ts';
+import { generateAci } from '../../../test-helpers/serviceIdUtils.std.ts';
 
 describe('both/state/selectors/conversations-extra', () => {
   const SERVICE_ID_1 = generateAci();
@@ -29,7 +29,7 @@ describe('both/state/selectors/conversations-extra', () => {
   const GROUP_ID = Bytes.toBase64(new Uint8Array(ID_LENGTH));
 
   const getEmptyRootState = (): StateType => {
-    return rootReducer(undefined, noopAction());
+    return rootReducer(undefined, noopAction('getEmptyRootState'));
   };
 
   function makeConversation(

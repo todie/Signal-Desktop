@@ -8,13 +8,13 @@ import { v4 as uuid } from 'uuid';
 
 import { ReleaseNoteAndMegaphoneFetcher } from '../../services/releaseNoteAndMegaphoneFetcher.preload.ts';
 import * as durations from '../../util/durations/index.std.ts';
-import { generateAci } from '../../types/ServiceId.std.ts';
 import { saveNewMessageBatcher } from '../../util/messageBatcher.preload.ts';
 import type { CIType } from '../../CI.preload.ts';
 import type { ConversationModel } from '../../models/conversations.preload.ts';
 import { itemStorage } from '../../textsecure/Storage.preload.ts';
 import { DataReader, DataWriter } from '../../sql/Client.preload.ts';
 import type { RemoteMegaphoneId } from '../../types/Megaphone.std.ts';
+import { generateAci } from '../../test-helpers/serviceIdUtils.std.ts';
 
 const { getAllMegaphones, hasMegaphone } = DataReader;
 
@@ -162,6 +162,11 @@ describe('ReleaseNoteAndMegaphoneFetcher', () => {
       set: sandbox.stub(),
       throttledUpdateUnread: sandbox.stub(),
       id: 'fake-signal-conversation-id',
+      setArchived: sandbox.stub(),
+      attributes: {
+        archived: false,
+      },
+      updateLastMessage: sandbox.stub(),
     };
 
     // Stub global methods
@@ -243,11 +248,9 @@ describe('ReleaseNoteAndMegaphoneFetcher', () => {
     sandbox.stub(saveNewMessageBatcher, 'add').resolves();
 
     // Mock SignalCI
-    window.SignalCI =
-      window.SignalCI ||
-      ({
-        handleEvent: sandbox.stub(),
-      } as unknown as CIType);
+    window.SignalCI ??= {
+      handleEvent: sandbox.stub(),
+    } as unknown as CIType;
 
     // Helper to run fetcher and wait for completion
     const runFetcherAndWaitForCompletion = async () => {
@@ -343,7 +346,8 @@ describe('ReleaseNoteAndMegaphoneFetcher', () => {
     sandbox.reset();
 
     // Restore original global values (even if they were undefined)
-    window.SignalCI = originalSignalCI as CIType;
+    // oxlint-disable-next-line typescript/no-non-null-assertion
+    window.SignalCI = originalSignalCI!;
 
     // Reset storage state
     await itemStorage.fetch();
@@ -508,11 +512,11 @@ describe('ReleaseNoteAndMegaphoneFetcher', () => {
       assert.strictEqual(dbMegaphones.length, 1);
       assert.strictEqual(dbMegaphone?.id, myMegaphone.uuid);
       assert.strictEqual(
-        dbMegaphone.dontShowBeforeEpochMs,
+        dbMegaphone?.dontShowBeforeEpochMs,
         myMegaphone.dontShowBeforeEpochSeconds * 1000
       );
       assert.strictEqual(
-        dbMegaphone.dontShowAfterEpochMs,
+        dbMegaphone?.dontShowAfterEpochMs,
         myMegaphone.dontShowAfterEpochSeconds * 1000
       );
     });

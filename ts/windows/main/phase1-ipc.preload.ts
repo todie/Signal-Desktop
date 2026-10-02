@@ -33,6 +33,7 @@ import { ToastType } from '../../types/Toast.dom.tsx';
 import { ConversationController } from '../../ConversationController.preload.ts';
 import { isEnabled } from '../../RemoteConfig.dom.ts';
 import { itemStorage } from '../../textsecure/Storage.preload.ts';
+import { BackupLevel } from '../../services/backups/types.std.ts';
 
 const { mapValues } = lodash;
 
@@ -126,11 +127,14 @@ const IPC: IPCType = {
       connectTime: preloadConnectTime - window.preloadEndTime,
       processedCount,
     }),
-  readyForUpdates: () => ipc.send('ready-for-updates'),
+  readyForUpdates: () => {
+    window.SignalCI?.handleEvent('ready-for-updates', null);
+    ipc.send('ready-for-updates');
+  },
   removeSetupMenuItems: () => ipc.send('remove-setup-menu-items'),
   setAutoHideMenuBar: autoHide => ipc.send('set-auto-hide-menu-bar', autoHide),
   setAutoLaunch: value => ipc.invoke('set-auto-launch', value),
-  setBadge: badge => ipc.send('set-badge', badge),
+  setBadgeCount: badgeCount => ipc.send('set-badge-count', badgeCount),
   setMenuBarVisibility: visibility =>
     ipc.send('set-menu-bar-visibility', visibility),
   showDebugLog: (options?: { mode?: 'submit' | 'close' }) => {
@@ -218,7 +222,7 @@ window.open = () => null;
 
 // Playwright uses `eval` for `.evaluate()` API
 if (config.ciMode !== 'full' && config.environment !== Environment.Test) {
-  // oxlint-disable-next-line no-multi-assign
+  // oxlint-disable-next-line no-multi-assign, no-eval
   window.eval = global.eval = () => null;
 }
 
@@ -246,9 +250,19 @@ ipc.on('additional-log-data-request', async event => {
     statistics = {};
   }
 
-  let networkStatistics: NetworkStatistics = {
-    signalConnectionCount: formatCountForLogging(getSignalConnections().length),
-  };
+  let networkStatistics: NetworkStatistics;
+  try {
+    networkStatistics = {
+      signalConnectionCount: formatCountForLogging(
+        getSignalConnections().length
+      ),
+    };
+  } catch (error) {
+    networkStatistics = {
+      signalConnectionCount: undefined,
+    };
+  }
+
   const unauthorizedStats = AggregatedStats.loadOrCreateEmpty(
     UNAUTHENTICATED_CHANNEL_NAME
   );
@@ -274,9 +288,26 @@ ipc.on('additional-log-data-request', async event => {
   }
 
   const ourAci = itemStorage.user.getAci();
-  const ourPni = itemStorage.user.getPni();
+  const ourPni = itemStorage.user.getOptionalPni();
+
+  let backupTierLogCode: string;
+  switch (itemStorage.get('backupTier')) {
+    case null:
+    case undefined:
+      backupTierLogCode = 'D1';
+      break;
+    case BackupLevel.Free:
+      backupTierLogCode = 'F1';
+      break;
+    case BackupLevel.Paid:
+      backupTierLogCode = itemStorage.get('backupsSubscriberId') ? 'P1' : 'T1';
+      break;
+    default:
+      backupTierLogCode = 'unknown';
+  }
 
   event.sender.send('additional-log-data-response', {
+    backupTierLogCode,
     capabilities: ourCapabilities || {},
     remoteConfig: mapValues(remoteConfig, ({ value, enabled }) => {
       const enableString = enabled ? 'enabled' : 'disabled';
@@ -414,7 +445,7 @@ ipc.on('donation-paypal-canceled', (_event, { returnToken }) => {
 ipc.on('show-conversation-via-token', (_event, token: string) => {
   const { showConversationViaToken } = window.Events;
   if (showConversationViaToken) {
-    void showConversationViaToken(token);
+    showConversationViaToken(token);
   }
 });
 ipc.on('show-conversation-via-signal.me', (_event, info) => {

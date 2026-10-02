@@ -14,10 +14,6 @@ import {
   SenderCertificate,
   UnidentifiedSenderMessageContent,
 } from '@signalapp/libsignal-client';
-import type {
-  MismatchedDevicesError,
-  RateLimitedError,
-} from '@signalapp/libsignal-client';
 import {
   signalProtocolStore,
   GLOBAL_ZONE,
@@ -48,6 +44,7 @@ import { messageSender } from '../textsecure/SendMessage.preload.ts';
 import {
   ConnectTimeoutError,
   IncorrectSenderKeyAuthError,
+  MismatchedDevicesError,
   OutgoingIdentityKeyError,
   SendMessageProtoError,
   UnknownRecipientError,
@@ -84,15 +81,13 @@ import { strictAssert } from './assert.std.ts';
 import { createLogger } from '../logging/log.std.ts';
 import { waitForAll } from './waitForAll.std.ts';
 import type { GroupSendEndorsementState } from './groupSendEndorsements.preload.ts';
-import {
-  maybeCreateGroupSendEndorsementState,
-  onFailedToSendWithEndorsements,
-} from './groupSendEndorsements.preload.ts';
+import { maybeCreateGroupSendEndorsementState } from './groupSendEndorsements.preload.ts';
 import type { GroupSendToken } from '../types/GroupSendEndorsements.std.ts';
 import { isAciString } from './isAciString.std.ts';
 import { safeParseStrict, safeParseUnknown } from './schemas.std.ts';
 import { itemStorage } from '../textsecure/Storage.preload.ts';
 import { isFeaturedEnabledNoRedux } from './isFeatureEnabled.dom.ts';
+import { handleMismatchedDevicesError } from './handleMismatchedDevicesError.preload.ts';
 
 const { differenceWith, omit } = lodash;
 
@@ -273,7 +268,7 @@ type SendRecursion = {
   reason: string;
 };
 
-export async function sendToGroupViaSenderKey(
+async function sendToGroupViaSenderKey(
   options: SendToGroupOptions,
   recursion: SendRecursion
 ): Promise<CallbackResultType> {
@@ -365,10 +360,12 @@ export async function sendToGroupViaSenderKey(
 
   let groupSendEndorsementState: GroupSendEndorsementState | null = null;
   if (groupId != null && !story) {
+    const alreadyInQueue = true;
     const { state, didRefreshGroupState } =
       await maybeCreateGroupSendEndorsementState(
         groupId,
-        recursion.didRefreshGroupState
+        recursion.didRefreshGroupState,
+        alreadyInQueue
       );
     if (state != null) {
       groupSendEndorsementState = state;
@@ -484,6 +481,7 @@ export async function sendToGroupViaSenderKey(
       //   want the successful SKDM sends to be considered an overall success.
       if (error instanceof SendMessageProtoError) {
         throw new SendMessageProtoError({
+          // oxlint-disable-next-line typescript/no-misused-spread
           ...error,
           sendIsNotFinal: true,
         });
@@ -626,27 +624,26 @@ export async function sendToGroupViaSenderKey(
     }
   } catch (error) {
     if (error instanceof LibSignalErrorBase) {
-      if (error.code === ErrorCode.RequestUnauthorized) {
+      if (error.is(ErrorCode.RequestUnauthorized)) {
         throw new HTTPError('libsignal threw RequestUnauthorized', {
           code: 401,
           headers: {},
         });
       }
-      if (error.code === ErrorCode.ChatServiceInactive) {
+      if (error.is(ErrorCode.ChatServiceInactive)) {
         throw new HTTPError('libsignal threw ChatServiceInactive', {
           code: -1,
           headers: {},
         });
       }
-      if (error.code === ErrorCode.IoError) {
+      if (error.is(ErrorCode.IoError)) {
         throw new HTTPError('libsignal threw IoError', {
           code: -1,
           headers: {},
         });
       }
-      if (error.code === ErrorCode.RateLimitedError) {
-        const rateLimitedError = error as unknown as RateLimitedError;
-        const { retryAfterSecs } = rateLimitedError;
+      if (error.is(ErrorCode.RateLimitedError)) {
+        const { retryAfterSecs } = error;
         throw new HTTPError(
           `libsignal threw RateLimitedError with retryAfterSecs=${retryAfterSecs}`,
           {
@@ -657,76 +654,33 @@ export async function sendToGroupViaSenderKey(
           }
         );
       }
-      if (error.code === ErrorCode.MismatchedDevices) {
-        const mismatchedError = error as unknown as MismatchedDevicesError;
-        const { entries } = mismatchedError;
-        const staleDevices: Array<PartialDeviceType> = [];
-        log.warn(
-          `${logId}: libsignal threw MismatchedDevices, with ${entries?.length} entries`
+      if (error.is(ErrorCode.MismatchedDevices)) {
+        const mismatchedError = new MismatchedDevicesError(
+          error.entries.map(entry => ({
+            serviceId: fromServiceIdObject(entry.account),
+            extraDevices: entry.extraDevices,
+            staleDevices: entry.staleDevices,
+            missingDevices: entry.missingDevices,
+          }))
         );
-
-        await waitForAll({
-          maxConcurrency: 3,
-          tasks: entries.map(entry => async () => {
-            const uuid = fromServiceIdObject(entry.account);
-            const isEmpty =
-              entry.missingDevices.length === 0 &&
-              entry.extraDevices.length === 0 &&
-              entry.staleDevices.length === 0;
-
-            if (isEmpty) {
-              log.warn(
-                `${logId}/MismatchedDevices: Entry for ${uuid} was empty - fetching all keys`
-              );
-              await fetchKeysForServiceId(
-                uuid,
-                null,
-                groupSendEndorsementState
-              );
-            }
-
-            if (entry.missingDevices.length > 0) {
-              // Start new sessions; didn't have sessions before
-              await fetchKeysForServiceId(
-                uuid,
-                entry.missingDevices,
-                groupSendEndorsementState
-              );
-            }
-
-            // Clear unneeded sessions
-            await waitForAll({
-              tasks: entry.extraDevices.map(deviceId => async () => {
-                await signalProtocolStore.archiveSession(
-                  new QualifiedAddress(ourAci, Address.create(uuid, deviceId))
-                );
-              }),
-            });
-
-            await waitForAll({
-              tasks: entry.staleDevices.map(device => async () => {
-                // Save all stale devices in one list for updating senderKeyInfo
-                staleDevices.push({ serviceId: uuid, id: device });
-
-                // Clear stale sessions
-                await signalProtocolStore.archiveSession(
-                  new QualifiedAddress(ourAci, Address.create(uuid, device))
-                );
-              }),
-            });
-
-            if (entry.staleDevices.length > 0) {
-              // Start new sessions; previous session was stale
-              await fetchKeysForServiceId(
-                uuid,
-                entry.staleDevices,
-                groupSendEndorsementState
-              );
-            }
-          }),
+        await handleMismatchedDevicesError(mismatchedError, {
+          fetchKeysForServiceId: (serviceId, devices) =>
+            fetchKeysForServiceId(
+              serviceId,
+              devices,
+              groupSendEndorsementState
+            ),
+          log,
+          ourAci,
         });
 
-        // Update sende senderKeyInfo in one update
+        // Also, update senderKey for stale devices
+        const staleDevices: Array<PartialDeviceType> = [];
+        for (const entry of mismatchedError.entries) {
+          for (const deviceId of entry.staleDevices) {
+            staleDevices.push({ serviceId: entry.serviceId, id: deviceId });
+          }
+        }
         if (staleDevices.length > 0) {
           const toUpdate = sendTarget.getSenderKeyInfo();
           if (toUpdate) {
@@ -746,11 +700,9 @@ export async function sendToGroupViaSenderKey(
     }
 
     if (error.code === UNKNOWN_RECIPIENT) {
-      onFailedToSendWithEndorsements(error);
       throw new UnknownRecipientError();
     }
     if (error.code === INCORRECT_AUTH_KEY) {
-      onFailedToSendWithEndorsements(error);
       throw new IncorrectSenderKeyAuthError();
     }
 
@@ -784,13 +736,6 @@ export async function sendToGroupViaSenderKey(
 
         // Now that we've eliminate this problematic account, we can try the send again.
         return startOver('error: invalid registration id');
-      }
-    }
-
-    if (groupSendEndorsementState != null) {
-      // Ignore server errors
-      if (!(error instanceof HTTPError && error.code === 500)) {
-        onFailedToSendWithEndorsements(error);
       }
     }
 
@@ -833,7 +778,7 @@ export async function sendToGroupViaSenderKey(
     deviceIds,
   }: {
     serviceId: ServiceIdString;
-    deviceIds: Array<number>;
+    deviceIds: ReadonlyArray<number>;
   }) => {
     if (!shouldSaveProto(sendType)) {
       return;
@@ -935,6 +880,7 @@ function mergeSendResult({
   senderKeyRecipientsWithDevices: Record<ServiceIdString, Array<number>>;
 }): CallbackResultType {
   return {
+    // oxlint-disable-next-line typescript/no-misused-spread
     ...result,
     successfulServiceIds: [
       ...(result.successfulServiceIds || []),
@@ -990,7 +936,7 @@ export function _shouldFailSend(error: unknown, logId: string): boolean {
 
   if (
     error instanceof LibSignalErrorBase &&
-    error.code === ErrorCode.UntrustedIdentity
+    error.is(ErrorCode.UntrustedIdentity)
   ) {
     logError("'untrusted identity' error, failing.");
     return true;
@@ -1377,11 +1323,6 @@ function isValidSenderKeyRecipient(
 
   if (groupSendEndorsementState != null) {
     if (!groupSendEndorsementState.hasMember(serviceId)) {
-      onFailedToSendWithEndorsements(
-        new Error(
-          `isValidSenderKeyRecipient: Sending to ${serviceId}, missing endorsement`
-        )
-      );
       return false;
     }
   } else if (!getAccessKey(memberConversation.attributes, { story })) {
@@ -1467,7 +1408,7 @@ export function _analyzeSenderKeyDevices(
   };
 }
 
-function getOurAddress(): Address {
+export function getOurAddress(): Address {
   const ourAci = itemStorage.user.getCheckedAci();
   const ourDeviceId = itemStorage.user.getDeviceId();
   if (!ourDeviceId) {
@@ -1532,7 +1473,7 @@ async function fetchKeysForServiceId(
   groupSendEndorsementState: GroupSendEndorsementState | null
 ): Promise<void> {
   const logId = `fetchKeysForServiceId/${serviceId}`;
-  log.info(`${logId}: Fetching ${devices || 'all'} devices`);
+  log.info(`${logId}: Fetching ${devices?.join(', ') || 'all'} devices`);
 
   const emptyConversation = window.ConversationController.getOrCreate(
     serviceId,
@@ -1584,14 +1525,8 @@ async function fetchKeysForServiceId(
       await markServiceIdUnregistered(serviceId);
       return;
     }
-    if (useGroupSendEndorsement) {
-      // Ignore untrusted identity key errors
-      if (!(error instanceof OutgoingIdentityKeyError)) {
-        onFailedToSendWithEndorsements(error as Error);
-      }
-    }
     log.error(
-      `${logId}: Error fetching ${devices || 'all'} devices`,
+      `${logId}: Error fetching ${devices?.join(', ') || 'all'} devices`,
       Errors.toLogFormat(error)
     );
     throw error;

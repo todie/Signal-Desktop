@@ -29,17 +29,19 @@ const MIN_REFRESH_DELAY = MINUTE;
 
 let idCounter = 1;
 
-export class RoutineProfileRefresher {
-  #started = false;
-  #id: number;
+type Options = Readonly<{
+  getAllConversations: () => ReadonlyArray<ConversationModel>;
+  getOurConversationId: () => string | undefined;
+  storage: Pick<StorageInterface, 'get' | 'put'>;
+}>;
 
-  constructor(
-    private readonly options: {
-      getAllConversations: () => ReadonlyArray<ConversationModel>;
-      getOurConversationId: () => string | undefined;
-      storage: Pick<StorageInterface, 'get' | 'put'>;
-    }
-  ) {
+export class RoutineProfileRefresher {
+  readonly #options: Options;
+  #started = false;
+  readonly #id: number;
+
+  constructor(options: Options) {
+    this.#options = options;
     // We keep track of how many of these classes we create, because we suspect that
     //   there might be too many...
     idCounter += 1;
@@ -58,7 +60,14 @@ export class RoutineProfileRefresher {
     }
     this.#started = true;
 
-    const { storage, getAllConversations, getOurConversationId } = this.options;
+    // This avoids routine profile fetches leading to races in mock tests
+    if (window.SignalCI) {
+      log.info(`${logId}: skipping in CI mode`);
+      return;
+    }
+
+    const { storage, getAllConversations, getOurConversationId } =
+      this.#options;
 
     // oxlint-disable-next-line no-constant-condition
     while (true) {
@@ -167,7 +176,6 @@ export async function routineProfileRefresh({
   const refreshQueue = new PQueue({
     concurrency: 5,
     timeout: MINUTE * 30,
-    throwOnTimeout: true,
   });
   for (const conversation of conversationsToRefresh) {
     drop(refreshQueue.add(() => refreshConversation(conversation)));

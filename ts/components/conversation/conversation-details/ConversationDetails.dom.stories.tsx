@@ -1,7 +1,7 @@
 // Copyright 2021 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import * as React from 'react';
+import type { JSX } from 'react';
 
 import { action } from '@storybook/addon-actions';
 import lodash from 'lodash';
@@ -22,6 +22,7 @@ import type { ContactNameColorType } from '../../../types/Colors.std.ts';
 import { ContactNameColors } from '../../../types/Colors.std.ts';
 import { isNotNil } from '../../../util/isNotNil.std.ts';
 import { strictAssert } from '../../../util/assert.std.ts';
+import { Emoji } from '../../../axo/emoji.std.ts';
 
 const { times } = lodash;
 
@@ -48,7 +49,7 @@ const createProps = (
 ): Props => {
   const memberships = times(32, i => ({
     isAdmin: i === 1,
-    labelEmoji: i % 6 === 0 ? '🟢' : undefined,
+    labelEmoji: i % 6 === 0 ? Emoji.GREEN_CIRCLE : undefined,
     labelString: i % 3 === 0 ? `Task Wrangler ${i}` : undefined,
     member: getDefaultConversation({
       isMe: i === 2,
@@ -105,6 +106,7 @@ const createProps = (
     memberColors,
     maxGroupSize: 1001,
     maxRecommendedGroupSize: 151,
+    onNavigateToDonate: action('onNavigateToDonate'),
     pendingApprovalMemberships: times(8, () => ({
       member: getDefaultConversation(),
     })),
@@ -125,8 +127,8 @@ const createProps = (
     replaceAvatar: action('replaceAvatar'),
     saveAvatarToDisk: action('saveAvatarToDisk'),
     setMuteExpiration: action('setMuteExpiration'),
-    showToast: action('showToast'),
     userAvatarData: [],
+    reportSpam: action('reportSpam'),
     terminateGroup: action('terminateGroup'),
     toggleSafetyNumberModal: action('toggleSafetyNumberModal'),
     toggleAboutContactModal: action('toggleAboutContactModal'),
@@ -169,25 +171,37 @@ const createProps = (
   };
 };
 
-export function Basic(): React.JSX.Element {
+export function Basic(): JSX.Element {
   const props = createProps();
 
   return <ConversationDetails {...props} />;
 }
 
-export function MemberLabelsEditDisabled(): React.JSX.Element {
+export function MemberLabelsEditDisabled(): JSX.Element {
   const props = createProps();
 
   return <ConversationDetails {...props} isEditMemberLabelEnabled={false} />;
 }
 
-export function MemberLabelsCannotBeAdded(): React.JSX.Element {
+export function MemberLabelsCannotBeAdded(): JSX.Element {
   const props = createProps();
 
   return <ConversationDetails {...props} canAddLabel={false} />;
 }
 
-export function SystemContact(): React.JSX.Element {
+export function MemberLabelsNotAMember(): JSX.Element {
+  const props = createProps();
+
+  return (
+    <ConversationDetails
+      {...props}
+      canAddLabel={false}
+      memberships={props.memberships.filter(({ member }) => !member.isMe)}
+    />
+  );
+}
+
+export function SystemContact(): JSX.Element {
   const props = createProps();
   const contact = getDefaultConversation();
 
@@ -203,13 +217,13 @@ export function SystemContact(): React.JSX.Element {
   );
 }
 
-export function AsAdmin(): React.JSX.Element {
+export function AsAdmin(): JSX.Element {
   const props = createProps();
 
   return <ConversationDetails {...props} isAdmin />;
 }
 
-export function AsLastAdmin(): React.JSX.Element {
+export function AsLastAdmin(): JSX.Element {
   const props = createProps();
 
   return (
@@ -218,7 +232,7 @@ export function AsLastAdmin(): React.JSX.Element {
       isAdmin
       memberships={times(32, i => ({
         isAdmin: i === 2,
-        labelEmoji: i % 6 === 0 ? '🟢' : undefined,
+        labelEmoji: i % 6 === 0 ? Emoji.GREEN_CIRCLE : undefined,
         labelString: i % 3 === 0 ? `Last Admin ${i}` : undefined,
         member: getDefaultConversation({
           isMe: i === 2,
@@ -228,7 +242,7 @@ export function AsLastAdmin(): React.JSX.Element {
   );
 }
 
-export function AsOnlyAdmin(): React.JSX.Element {
+export function AsOnlyAdmin(): JSX.Element {
   const props = createProps();
 
   return (
@@ -249,13 +263,13 @@ export function AsOnlyAdmin(): React.JSX.Element {
   );
 }
 
-export function GroupEditable(): React.JSX.Element {
+export function GroupEditable(): JSX.Element {
   const props = createProps();
 
   return <ConversationDetails {...props} canEditGroupInfo />;
 }
 
-export function GroupEditableEditLabelDisabled(): React.JSX.Element {
+export function GroupEditableEditLabelDisabled(): JSX.Element {
   const props = createProps();
 
   return (
@@ -267,23 +281,23 @@ export function GroupEditableEditLabelDisabled(): React.JSX.Element {
   );
 }
 
-export function GroupEditableWithCustomDisappearingTimeout(): React.JSX.Element {
+export function GroupEditableWithCustomDisappearingTimeout(): JSX.Element {
   const props = createProps(false, DurationInSeconds.fromDays(3));
 
   return <ConversationDetails {...props} canEditGroupInfo />;
 }
 
-export function GroupLinksOn(): React.JSX.Element {
+export function GroupLinksOn(): JSX.Element {
   const props = createProps(true);
 
   return <ConversationDetails {...props} isAdmin />;
 }
 
-export const _11 = (): React.JSX.Element => (
+export const _11 = (): JSX.Element => (
   <ConversationDetails {...createProps()} isGroup={false} />
 );
 
-export function WithCallHistoryGroup(): React.JSX.Element {
+export function WithCallHistoryGroup(): JSX.Element {
   const props = createProps();
 
   return (
@@ -297,19 +311,19 @@ export function WithCallHistoryGroup(): React.JSX.Element {
   );
 }
 
-export function InAnotherCallGroup(): React.JSX.Element {
+export function InAnotherCallGroup(): JSX.Element {
   const props = createProps();
 
   return <ConversationDetails {...props} hasActiveCall />;
 }
 
-export function InAnotherCallIndividual(): React.JSX.Element {
+export function InAnotherCallIndividual(): JSX.Element {
   const props = createProps();
 
   return <ConversationDetails {...props} hasActiveCall isGroup={false} />;
 }
 
-export function SignalConversation(): React.JSX.Element {
+export function SignalConversation(): JSX.Element {
   const props = createProps();
 
   return (
@@ -317,7 +331,7 @@ export function SignalConversation(): React.JSX.Element {
   );
 }
 
-export function TerminatedGroup(): React.JSX.Element {
+export function TerminatedGroup(): JSX.Element {
   const props = createProps();
   strictAssert(props.conversation, 'conversation must exist');
 
@@ -335,7 +349,7 @@ export function TerminatedGroup(): React.JSX.Element {
   );
 }
 
-export function TerminatedGroupAsAdmin(): React.JSX.Element {
+export function TerminatedGroupAsAdmin(): JSX.Element {
   const props = createProps();
   strictAssert(props.conversation, 'conversation must exist');
 

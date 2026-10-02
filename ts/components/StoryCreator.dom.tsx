@@ -1,8 +1,8 @@
 // Copyright 2022 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import React, { useEffect, useState } from 'react';
-import lodash from 'lodash';
+import { useEffect, useState, type JSX } from 'react';
+import lodash, { omit } from 'lodash';
 
 import { createPortal } from 'react-dom';
 import type { AttachmentType } from '../types/Attachment.std.ts';
@@ -22,6 +22,7 @@ import { MediaEditor } from './MediaEditor.dom.tsx';
 import { TextStoryCreator } from './TextStoryCreator.dom.tsx';
 import type { DraftBodyRanges } from '../types/BodyRange.std.ts';
 import type { processAttachment } from '../util/processAttachment.preload.ts';
+import { AxoTheme } from '../axo/AxoTheme.dom.tsx';
 
 const { get, has } = lodash;
 
@@ -32,6 +33,7 @@ function usePortalElement(testid: string): HTMLDivElement | null {
     const div = document.createElement('div');
     div.dataset.testid = testid;
     document.body.appendChild(div);
+    // oxlint-disable-next-line react/set-state-in-effect
     setElement(div);
     return () => {
       document.body.removeChild(div);
@@ -136,7 +138,7 @@ export function StoryCreator({
   theme,
   toggleGroupsForStorySend,
   toggleSignalConnectionsModal,
-}: PropsType): React.JSX.Element | null {
+}: PropsType): JSX.Element | null {
   const portalElement = usePortalElement('StoryCreatorPortal');
 
   const [draftAttachment, setDraftAttachment] = useState<
@@ -177,7 +179,7 @@ export function StoryCreator({
             })
           );
           attachment = {
-            ...draft,
+            ...omit(draft, 'screenshotData'),
             screenshot: {
               contentType: draft.screenshotContentType,
               url,
@@ -209,6 +211,7 @@ export function StoryCreator({
   useEffect(() => {
     if (draftAttachment === undefined) {
       sendStoryModalOpenStateChanged(false);
+      // oxlint-disable-next-line react/set-state-in-effect
       setIsReadyToSend(false);
     } else {
       sendStoryModalOpenStateChanged(true);
@@ -217,7 +220,7 @@ export function StoryCreator({
 
   return portalElement != null
     ? createPortal(
-        <>
+        <AxoTheme.Override theme="force-dark">
           {draftAttachment && isReadyToSend && (
             <SendStoryModal
               draftAttachment={draftAttachment}
@@ -315,7 +318,7 @@ export function StoryCreator({
               onSelectEmoji={onSelectEmoji}
             />
           )}
-        </>,
+        </AxoTheme.Override>,
         portalElement
       )
     : null;

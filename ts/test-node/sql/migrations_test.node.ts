@@ -15,8 +15,8 @@ import { SeenStatus } from '../../MessageSeenStatus.std.ts';
 import { objectToJSON, sql, sqlJoin } from '../../sql/util.std.ts';
 import { BodyRange } from '../../types/BodyRange.std.ts';
 import type { AciString } from '../../types/ServiceId.std.ts';
-import { generateAci } from '../../types/ServiceId.std.ts';
 import { createDB, updateToVersion, explain } from './helpers.node.ts';
+import { generateAci } from '../../test-helpers/serviceIdUtils.std.ts';
 
 const OUR_UUID = generateGuid();
 
@@ -1837,8 +1837,8 @@ describe('SQL migrations test', () => {
           queueType: 'report spam',
           timestamp: 2,
           data: {
-            serverGuids: [`${MESSAGE_ID_1}`],
-            uuid: `${E164_1}`,
+            serverGuids: [MESSAGE_ID_1],
+            uuid: E164_1,
           },
         },
       ]);

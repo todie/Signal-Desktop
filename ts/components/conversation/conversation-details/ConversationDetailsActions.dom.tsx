@@ -1,21 +1,14 @@
 // Copyright 2021 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import type { ReactNode } from 'react';
-import React, { useState } from 'react';
-import classNames from 'classnames';
-
+import type { ReactNode, JSX } from 'react';
+import { useState } from 'react';
 import type { LocalizerType } from '../../../types/Util.std.ts';
-import { ConfirmationDialog } from '../../ConfirmationDialog.dom.tsx';
-import { Tooltip, TooltipPlacement } from '../../Tooltip.dom.tsx';
-
-import { PanelRow } from './PanelRow.dom.tsx';
-import { PanelSection } from './PanelSection.dom.tsx';
-import {
-  ConversationDetailsIcon,
-  IconType,
-} from './ConversationDetailsIcon.dom.tsx';
 import { DeleteMessagesConfirmationDialog } from '../../DeleteMessagesConfirmationDialog.dom.tsx';
+import { AxoConfirmDialog } from '../../../axo/AxoConfirmDialog.dom.tsx';
+import { AxoList } from '../../../axo/items/AxoList.dom.tsx';
+import { AxoItem } from '../../../axo/items/AxoItem.dom.tsx';
+import { AxoClickableItem } from '../../../axo/items/AxoClickableItem.dom.tsx';
 
 export type Props = {
   acceptConversation: (id: string) => void;
@@ -29,11 +22,14 @@ export type Props = {
   isBlocked: boolean;
   isGroup: boolean;
   isGroupTerminated: boolean;
+  isSignalConversation: boolean;
   left: boolean;
   onArchive: () => void;
   onDelete: () => void;
   onUnarchive: () => void;
   onLeave: () => void;
+  onReportSpam: () => void;
+  onReportSpamAndBlock: () => void;
   onTerminateGroup: () => void;
 };
 
@@ -49,18 +45,22 @@ export function ConversationDetailsActions({
   isBlocked,
   isGroup,
   isGroupTerminated,
+  isSignalConversation,
   left,
   onArchive,
   onDelete,
   onUnarchive,
   onLeave,
+  onReportSpamAndBlock,
+  onReportSpam,
   onTerminateGroup,
-}: Props): React.JSX.Element {
+}: Props): JSX.Element {
   const [confirmLeave, gLeave] = useState<boolean>(false);
   const [confirmGroupBlock, gGroupBlock] = useState<boolean>(false);
   const [confirmGroupUnblock, gGroupUnblock] = useState<boolean>(false);
   const [confirmDirectBlock, gDirectBlock] = useState<boolean>(false);
   const [confirmDirectUnblock, gDirectUnblock] = useState<boolean>(false);
+  const [confirmReportSpam, gConfirmReportSpam] = useState<boolean>(false);
   const [promptTerminateGroup, gPromptTerminateGroup] =
     useState<boolean>(false);
   const [confirmTerminateGroup, gConfirmTerminateGroup] =
@@ -70,136 +70,85 @@ export function ConversationDetailsActions({
   let leaveGroupNode: ReactNode;
   if (isGroup && !left && !isGroupTerminated) {
     leaveGroupNode = (
-      <PanelRow
+      <AxoClickableItem.Root
+        variant="destructive"
+        symbol="leave"
+        label={i18n('icu:ConversationDetailsActions--leave-group')}
+        tooltip={
+          cannotLeaveBecauseYouAreLastAdmin
+            ? i18n(
+                'icu:ConversationDetailsActions--leave-group-must-choose-new-admin'
+              )
+            : null
+        }
         disabled={cannotLeaveBecauseYouAreLastAdmin}
         onClick={() => gLeave(true)}
-        icon={
-          <ConversationDetailsIcon
-            ariaLabel={i18n('icu:ConversationDetailsActions--leave-group')}
-            disabled={cannotLeaveBecauseYouAreLastAdmin}
-            icon={IconType.leave}
-          />
-        }
-        label={
-          <div
-            className={classNames(
-              'ConversationDetails__leave-group',
-              cannotLeaveBecauseYouAreLastAdmin &&
-                'ConversationDetails__leave-group--disabled'
-            )}
-          >
-            {i18n('icu:ConversationDetailsActions--leave-group')}
-          </div>
-        }
       />
     );
-    if (cannotLeaveBecauseYouAreLastAdmin) {
-      leaveGroupNode = (
-        <Tooltip
-          content={i18n(
-            'icu:ConversationDetailsActions--leave-group-must-choose-new-admin'
-          )}
-          direction={TooltipPlacement.Top}
-        >
-          {leaveGroupNode}
-        </Tooltip>
-      );
-    }
   }
 
   let blockNode: ReactNode;
   if (isGroup && !isBlocked && !isGroupTerminated) {
     blockNode = (
-      <PanelRow
+      <AxoClickableItem.Root
+        variant="destructive"
+        symbol="block"
+        label={i18n('icu:ConversationDetailsActions--block-group')}
         disabled={cannotLeaveBecauseYouAreLastAdmin}
+        tooltip={
+          cannotLeaveBecauseYouAreLastAdmin
+            ? i18n(
+                'icu:ConversationDetailsActions--leave-group-must-choose-new-admin'
+              )
+            : null
+        }
         onClick={() => gGroupBlock(true)}
-        icon={
-          <ConversationDetailsIcon
-            ariaLabel={i18n('icu:ConversationDetailsActions--block-group')}
-            icon={IconType.block}
-          />
-        }
-        label={
-          <div className="ConversationDetails__block-group">
-            {i18n('icu:ConversationDetailsActions--block-group')}
-          </div>
-        }
       />
     );
   } else if (isGroup && isBlocked && !isGroupTerminated) {
     blockNode = (
-      <PanelRow
+      <AxoClickableItem.Root
+        variant="destructive"
+        symbol="block"
+        label={i18n('icu:ConversationDetailsActions--unblock-group')}
         onClick={() => gGroupUnblock(true)}
-        icon={
-          <ConversationDetailsIcon
-            ariaLabel={i18n('icu:ConversationDetailsActions--unblock-group')}
-            icon={IconType.unblock}
-          />
-        }
-        label={
-          <div className="ConversationDetails__unblock-group">
-            {i18n('icu:ConversationDetailsActions--unblock-group')}
-          </div>
-        }
       />
     );
   } else if (!isGroup) {
-    const label = isBlocked
-      ? i18n('icu:MessageRequests--unblock')
-      : i18n('icu:MessageRequests--block');
     blockNode = (
-      <PanelRow
-        onClick={() => (isBlocked ? gDirectUnblock(true) : gDirectBlock(true))}
-        icon={
-          <ConversationDetailsIcon
-            ariaLabel={label}
-            icon={isBlocked ? IconType.unblock : IconType.block}
-          />
-        }
+      <AxoClickableItem.Root
+        variant="destructive"
+        symbol="block"
         label={
-          <div
-            className={
-              isBlocked
-                ? 'ConversationDetails__unblock-group'
-                : 'ConversationDetails__block-group'
-            }
-          >
-            {label}
-          </div>
+          isBlocked
+            ? i18n('icu:MessageRequests--unblock')
+            : i18n('icu:MessageRequests--block')
         }
+        onClick={() => (isBlocked ? gDirectUnblock(true) : gDirectBlock(true))}
       />
     );
   }
 
-  if (cannotLeaveBecauseYouAreLastAdmin) {
-    blockNode = (
-      <Tooltip
-        content={i18n(
-          'icu:ConversationDetailsActions--leave-group-must-choose-new-admin'
-        )}
-        direction={TooltipPlacement.Top}
-      >
-        {blockNode}
-      </Tooltip>
+  let reportSpamNode: ReactNode;
+  if (!isSignalConversation) {
+    reportSpamNode = (
+      <AxoClickableItem.Root
+        variant="destructive"
+        symbol="error-octagon"
+        label={i18n('icu:ConversationDetailsActions--report-spam')}
+        onClick={() => gConfirmReportSpam(true)}
+      />
     );
   }
 
   let terminateGroupNode: ReactNode;
   if (canTerminateGroup) {
     terminateGroupNode = (
-      <PanelRow
+      <AxoClickableItem.Root
+        variant="destructive"
+        symbol="x-circle"
+        label={i18n('icu:ConversationDetailsActions--terminate-group')}
         onClick={() => gPromptTerminateGroup(true)}
-        icon={
-          <ConversationDetailsIcon
-            ariaLabel={i18n('icu:ConversationDetailsActions--terminate-group')}
-            icon={IconType.terminate}
-          />
-        }
-        label={
-          <div className={classNames('ConversationDetails__terminate-group')}>
-            {i18n('icu:ConversationDetailsActions--terminate-group')}
-          </div>
-        }
       />
     );
   }
@@ -208,224 +157,209 @@ export function ConversationDetailsActions({
   if (isGroupTerminated) {
     if (isArchived) {
       archiveNode = (
-        <PanelRow
+        <AxoClickableItem.Root
+          symbol="archive"
+          label={i18n('icu:ConversationDetailsActions--unarchive')}
           onClick={onUnarchive}
-          icon={
-            <ConversationDetailsIcon
-              ariaLabel={i18n('icu:ConversationDetailsActions--unarchive')}
-              icon={IconType.archive}
-            />
-          }
-          label={
-            <div className={classNames('ConversationDetails__unarchive')}>
-              {i18n('icu:ConversationDetailsActions--unarchive')}
-            </div>
-          }
         />
       );
     } else {
       archiveNode = (
-        <PanelRow
+        <AxoClickableItem.Root
+          symbol="archive"
+          label={i18n('icu:ConversationDetailsActions--archive')}
           onClick={onArchive}
-          icon={
-            <ConversationDetailsIcon
-              ariaLabel={i18n('icu:ConversationDetailsActions--archive')}
-              icon={IconType.archive}
-            />
-          }
-          label={
-            <div className={classNames('ConversationDetails__archive')}>
-              {i18n('icu:ConversationDetailsActions--archive')}
-            </div>
-          }
         />
       );
     }
   }
 
-  const deleteNode = isGroupTerminated ? (
-    <PanelRow
+  const deleteNode = isGroupTerminated && (
+    <AxoClickableItem.Root
+      variant="destructive"
+      symbol="trash"
+      label={i18n('icu:ConversationDetailsActions--delete')}
       onClick={() => gGroupDelete(true)}
-      icon={
-        <ConversationDetailsIcon
-          ariaLabel={i18n('icu:ConversationDetailsActions--delete')}
-          icon={IconType.delete}
-        />
-      }
-      label={
-        <div className={classNames('ConversationDetails__delete')}>
-          {i18n('icu:ConversationDetailsActions--delete')}
-        </div>
-      }
     />
-  ) : null;
+  );
 
   return (
     <>
-      <PanelSection>
+      <List>
         {leaveGroupNode}
         {blockNode}
         {archiveNode}
         {deleteNode}
-      </PanelSection>
-      {terminateGroupNode && <PanelSection>{terminateGroupNode}</PanelSection>}
-      {confirmLeave && (
-        <ConfirmationDialog
-          dialogName="ConversationDetailsAction.confirmLeave"
-          actions={[
-            {
-              text: i18n(
-                'icu:ConversationDetailsActions--leave-group-modal-confirm'
-              ),
-              action: onLeave,
-              style: 'negative',
-            },
-          ]}
-          i18n={i18n}
-          onClose={() => gLeave(false)}
-          title={i18n(
-            'icu:ConversationDetailsActions--leave-group-modal-title'
-          )}
-        >
-          {i18n('icu:ConversationDetailsActions--leave-group-modal-content')}
-        </ConfirmationDialog>
-      )}
+        {reportSpamNode}
+      </List>
+      {terminateGroupNode && <List>{terminateGroupNode}</List>}
+      <AxoConfirmDialog.Root
+        open={confirmLeave}
+        onOpenChange={gLeave}
+        title={i18n('icu:ConversationDetailsActions--leave-group-modal-title')}
+        description={i18n(
+          'icu:ConversationDetailsActions--leave-group-modal-content'
+        )}
+      >
+        <AxoConfirmDialog.Cancel />
+        <AxoConfirmDialog.Action variant="strong-destructive" onClick={onLeave}>
+          {i18n('icu:ConversationDetailsActions--leave-group-modal-confirm')}
+        </AxoConfirmDialog.Action>
+      </AxoConfirmDialog.Root>
 
-      {confirmGroupBlock && (
-        <ConfirmationDialog
-          dialogName="ConversationDetailsAction.confirmBlock"
-          actions={[
-            {
-              text: i18n(
-                'icu:ConversationDetailsActions--block-group-modal-confirm'
-              ),
-              action: () => blockConversation(conversationId),
-              style: 'negative',
-            },
-          ]}
-          i18n={i18n}
-          onClose={() => gGroupBlock(false)}
-          title={i18n(
-            'icu:ConversationDetailsActions--block-group-modal-title',
-            {
-              groupName: conversationTitle,
-            }
-          )}
+      <AxoConfirmDialog.Root
+        open={confirmGroupBlock}
+        onOpenChange={gGroupBlock}
+        title={i18n('icu:ConversationDetailsActions--block-group-modal-title', {
+          groupName: conversationTitle,
+        })}
+        description={i18n(
+          'icu:ConversationDetailsActions--block-group-modal-content'
+        )}
+      >
+        <AxoConfirmDialog.Cancel />
+        <AxoConfirmDialog.Action
+          variant="strong-destructive"
+          onClick={() => blockConversation(conversationId)}
         >
-          {i18n('icu:ConversationDetailsActions--block-group-modal-content')}
-        </ConfirmationDialog>
-      )}
-      {confirmGroupUnblock && (
-        <ConfirmationDialog
-          dialogName="ConversationDetailsAction.confirmUnblock"
-          actions={[
-            {
-              text: i18n(
-                'icu:ConversationDetailsActions--unblock-group-modal-confirm'
-              ),
-              action: () => acceptConversation(conversationId),
-              style: 'negative',
-            },
-          ]}
-          i18n={i18n}
-          onClose={() => gGroupUnblock(false)}
-          title={i18n(
-            'icu:ConversationDetailsActions--unblock-group-modal-title',
-            {
-              groupName: conversationTitle,
-            }
-          )}
-        >
-          {i18n('icu:ConversationDetailsActions--unblock-group-modal-body')}
-        </ConfirmationDialog>
-      )}
+          {i18n('icu:ConversationDetailsActions--block-group-modal-confirm')}
+        </AxoConfirmDialog.Action>
+      </AxoConfirmDialog.Root>
 
-      {confirmDirectBlock && (
-        <ConfirmationDialog
-          dialogName="ConversationDetailsAction.confirmDirectBlock"
-          actions={[
-            {
-              text: i18n('icu:MessageRequests--block'),
-              action: () => blockConversation(conversationId),
-              style: 'negative',
-            },
-          ]}
-          i18n={i18n}
-          onClose={() => gDirectBlock(false)}
-          title={i18n('icu:MessageRequests--block-direct-confirm-title', {
-            title: conversationTitle,
-          })}
+      <AxoConfirmDialog.Root
+        open={confirmGroupUnblock}
+        onOpenChange={gGroupUnblock}
+        title={i18n(
+          'icu:ConversationDetailsActions--unblock-group-modal-title',
+          {
+            groupName: conversationTitle,
+          }
+        )}
+        description={i18n(
+          'icu:ConversationDetailsActions--unblock-group-modal-body'
+        )}
+      >
+        <AxoConfirmDialog.Cancel />
+        <AxoConfirmDialog.Action
+          variant="strong-destructive"
+          onClick={() => acceptConversation(conversationId)}
         >
-          {i18n('icu:MessageRequests--block-direct-confirm-body')}
-        </ConfirmationDialog>
-      )}
-      {confirmDirectUnblock && (
-        <ConfirmationDialog
-          dialogName="ConversationDetailsAction.confirmDirectUnblock"
-          actions={[
-            {
-              text: i18n('icu:MessageRequests--unblock'),
-              action: () => acceptConversation(conversationId),
-              style: 'affirmative',
-            },
-          ]}
-          i18n={i18n}
-          onClose={() => gDirectUnblock(false)}
-          title={i18n('icu:MessageRequests--unblock-direct-confirm-title', {
-            name: conversationTitle,
-          })}
-        >
-          {i18n('icu:MessageRequests--unblock-direct-confirm-body')}
-        </ConfirmationDialog>
-      )}
+          {i18n('icu:ConversationDetailsActions--unblock-group-modal-confirm')}
+        </AxoConfirmDialog.Action>
+      </AxoConfirmDialog.Root>
 
-      {promptTerminateGroup && (
-        <ConfirmationDialog
-          dialogName="ConversationDetailsAction.promptTerminateGroup"
-          actions={[
-            {
-              text: i18n(
-                'icu:ConversationDetailsActions--terminate-group-modal-confirm'
-              ),
-              action: () => gConfirmTerminateGroup(true),
-              style: 'negative',
-            },
-          ]}
-          i18n={i18n}
-          onClose={() => gPromptTerminateGroup(false)}
-          title={i18n(
-            'icu:ConversationDetailsActions--prompt-terminate-group-modal-title',
-            {
-              groupName: conversationTitle,
-            }
-          )}
+      <AxoConfirmDialog.Root
+        open={confirmDirectBlock}
+        onOpenChange={gDirectBlock}
+        title={i18n('icu:MessageRequests--block-direct-confirm-title', {
+          title: conversationTitle,
+        })}
+        description={i18n('icu:MessageRequests--block-direct-confirm-body')}
+      >
+        <AxoConfirmDialog.Cancel />
+        <AxoConfirmDialog.Action
+          variant="strong-destructive"
+          onClick={() => blockConversation(conversationId)}
+        >
+          {i18n('icu:MessageRequests--block')}
+        </AxoConfirmDialog.Action>
+      </AxoConfirmDialog.Root>
+
+      <AxoConfirmDialog.Root
+        open={confirmDirectUnblock}
+        onOpenChange={gDirectUnblock}
+        title={i18n('icu:MessageRequests--unblock-direct-confirm-title', {
+          name: conversationTitle,
+        })}
+        description={i18n('icu:MessageRequests--unblock-direct-confirm-body')}
+      >
+        <AxoConfirmDialog.Cancel />
+        <AxoConfirmDialog.Action
+          variant="strong-primary"
+          onClick={() => acceptConversation(conversationId)}
+        >
+          {i18n('icu:MessageRequests--unblock')}
+        </AxoConfirmDialog.Action>
+      </AxoConfirmDialog.Root>
+
+      <AxoConfirmDialog.Root
+        open={confirmReportSpam}
+        onOpenChange={gConfirmReportSpam}
+        title={i18n('icu:MessageRequests--ReportAndMaybeBlockModal-title')}
+        description={
+          isGroup
+            ? i18n(
+                'icu:ConversationDetailsActions--report-spam-modal-content-group'
+              )
+            : i18n(
+                'icu:ConversationDetailsActions--report-spam-modal-content-direct'
+              )
+        }
+      >
+        <AxoConfirmDialog.Cancel />
+        <AxoConfirmDialog.Action
+          variant="strong-destructive"
+          onClick={onReportSpam}
         >
           {i18n(
-            'icu:ConversationDetailsActions--prompt-terminate-group-modal-content'
+            'icu:ConversationDetailsActions--report-spam-modal-report-spam'
           )}
-        </ConfirmationDialog>
-      )}
+        </AxoConfirmDialog.Action>
+        {!isBlocked && (
+          <AxoConfirmDialog.Action
+            variant="strong-destructive"
+            onClick={onReportSpamAndBlock}
+          >
+            {i18n(
+              'icu:ConversationDetailsActions--report-spam-modal-report-and-block'
+            )}
+          </AxoConfirmDialog.Action>
+        )}
+      </AxoConfirmDialog.Root>
 
-      {confirmTerminateGroup && (
-        <ConfirmationDialog
-          dialogName="ConversationDetailsAction.confirmTerminateGroup"
-          actions={[
-            {
-              text: i18n(
-                'icu:ConversationDetailsActions--terminate-group-modal-confirm'
-              ),
-              action: onTerminateGroup,
-              style: 'negative',
-            },
-          ]}
-          i18n={i18n}
-          onClose={() => gConfirmTerminateGroup(false)}
+      <AxoConfirmDialog.Root
+        open={promptTerminateGroup}
+        onOpenChange={gPromptTerminateGroup}
+        title={i18n(
+          'icu:ConversationDetailsActions--prompt-terminate-group-modal-title',
+          {
+            groupName: conversationTitle,
+          }
+        )}
+        description={i18n(
+          'icu:ConversationDetailsActions--prompt-terminate-group-modal-content'
+        )}
+      >
+        <AxoConfirmDialog.Cancel />
+        <AxoConfirmDialog.Action
+          variant="strong-destructive"
+          onClick={() => gConfirmTerminateGroup(true)}
         >
           {i18n(
-            'icu:ConversationDetailsActions--confirm-terminate-group-confirm-modal-content'
+            'icu:ConversationDetailsActions--terminate-group-modal-confirm'
           )}
-        </ConfirmationDialog>
-      )}
+        </AxoConfirmDialog.Action>
+      </AxoConfirmDialog.Root>
+
+      <AxoConfirmDialog.Root
+        open={confirmTerminateGroup}
+        onOpenChange={gConfirmTerminateGroup}
+        // @ts-expect-error ConfirmationDialog migration: Needs title
+        title={null}
+        description={i18n(
+          'icu:ConversationDetailsActions--confirm-terminate-group-confirm-modal-content'
+        )}
+      >
+        <AxoConfirmDialog.Cancel />
+        <AxoConfirmDialog.Action
+          variant="strong-destructive"
+          onClick={onTerminateGroup}
+        >
+          {i18n(
+            'icu:ConversationDetailsActions--terminate-group-modal-confirm'
+          )}
+        </AxoConfirmDialog.Action>
+      </AxoConfirmDialog.Root>
 
       {confirmGroupDelete && (
         <DeleteMessagesConfirmationDialog
@@ -437,8 +371,29 @@ export function ConversationDetailsActions({
           onClose={() => {
             gGroupDelete(false);
           }}
+          areWeMember={!left && !isGroupTerminated}
         />
       )}
     </>
+  );
+}
+
+type ListProps = Readonly<{
+  label?: string;
+  children: ReactNode;
+}>;
+
+function List(props: ListProps): ReactNode {
+  return (
+    <AxoList.Root>
+      {props.label != null && (
+        <AxoList.Header>
+          <AxoList.Label>{props.label}</AxoList.Label>
+        </AxoList.Header>
+      )}
+      <AxoList.Body>
+        <AxoItem.Group>{props.children}</AxoItem.Group>
+      </AxoList.Body>
+    </AxoList.Root>
   );
 }

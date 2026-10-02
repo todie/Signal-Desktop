@@ -456,6 +456,7 @@ const ITEM_SPECS: Partial<Record<ItemKeyType, ObjectMappingSpecType>> = {
   manifestRecordIkm: ['value'],
   usernameLink: ['value.entropy', 'value.serverId'],
   lastDistinguishedTreeHead: ['value'],
+  payments: ['value.entropy'],
 };
 async function createOrUpdateItem<K extends ItemKeyType>(
   data: ItemType<K>
@@ -481,7 +482,9 @@ async function getItemById<K extends ItemKeyType>(
   const data = await readableChannel.getItemById(id);
 
   try {
-    return spec ? specToBytes(spec, data) : (data as unknown as ItemType<K>);
+    return spec
+      ? await specToBytes(spec, data)
+      : (data as unknown as ItemType<K>);
   } catch (error) {
     log.warn(`getItemById(${id}): Failed to parse item from spec`, error);
     return undefined;
@@ -691,7 +694,7 @@ async function removeMessagesById(
   return removeMessages(messages, options);
 }
 
-export async function removeMessages(
+async function removeMessages(
   messages: ReadonlyArray<MessageAttributesType>,
   options: RemoveMessageOptions
 ): Promise<void> {

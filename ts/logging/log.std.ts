@@ -101,7 +101,7 @@ function getPattern(): RegExp {
     value = window.localStorage.getItem('debug') || '';
   }
   if (typeof process !== 'undefined' && process.env) {
-    value = value || process.env.DEBUG || '';
+    value ??= process.env.DEBUG || '';
   }
 
   const parts = value
@@ -155,6 +155,7 @@ function debugLog(
 
   // `fatal` has no respective analog in `console`
   console[consoleMethod === 'fatal' ? 'error' : consoleMethod](
+    // oxlint-disable-next-line typescript/restrict-template-expressions
     `%c${msgPrefix ?? ''}%c${message}`,
     `color: ${color}; font-weight: bold`,
     'color: inherit; font-weight: inherit',
@@ -190,7 +191,7 @@ const pinoInstance = pino(
     timestamp: pino.stdTimeFunctions.isoTime,
     redact: {
       paths: ['*'],
-      censor: item => redactAll(item),
+      censor: item => redactAll(String(item)),
     },
   },
   {

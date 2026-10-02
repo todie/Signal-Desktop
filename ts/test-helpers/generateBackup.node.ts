@@ -11,7 +11,6 @@ import {
 import { MessageBackupKey } from '@signalapp/libsignal-client/dist/MessageBackup.js';
 
 import type { AciString } from '../types/ServiceId.std.ts';
-import { generateAci } from '../types/ServiceId.std.ts';
 import { CipherType } from '../types/Crypto.std.ts';
 import { appendPaddingStream } from '../util/logPadding.node.ts';
 import { prependStream } from '../util/prependStream.node.ts';
@@ -20,6 +19,7 @@ import { toAciObject } from '../util/ServiceId.node.ts';
 import { encodeDelimited } from '../util/encodeDelimited.std.ts';
 import { BACKUP_VERSION } from '../services/backups/constants.std.ts';
 import { Backups } from '../protobuf/index.std.ts';
+import { generateAci } from './serviceIdUtils.std.ts';
 
 export type BackupGeneratorConfigType = Readonly<
   {
@@ -100,7 +100,7 @@ function* createRecords({
 }: BackupGeneratorConfigType): Iterable<Uint8Array<ArrayBuffer>> {
   yield* encodeDelimited(
     Backups.BackupInfo.encode({
-      version: BigInt(BACKUP_VERSION),
+      version: BACKUP_VERSION,
       backupTimeMs: getTimestamp(),
       mediaRootBackupKey,
       currentAppVersion: null,
@@ -126,12 +126,19 @@ function* createRecords({
         preferredReactionEmoji: [],
         displayBadgesOnProfile: true,
         keepMutedChatsArchived: false,
+        notifyForCallsIfMuted: null,
+        notifyForMentionsIfMuted: null,
+        notifyForRepliesIfMuted: null,
+        notifyWhenContactJoins: null,
+        showUnreadReminders: null,
         hasSetMyStoriesPrivacy: true,
         hasViewedOnboardingStory: true,
         storiesDisabled: false,
         hasSeenGroupStoryEducationSheet: true,
         hasCompletedUsernameOnboarding: true,
         hasSeenAdminDeleteEducationDialog: false,
+        includeMutedChatsInBadge: true,
+        reactionNotifications: true,
         phoneNumberSharingMode:
           Backups.AccountData.PhoneNumberSharingMode.EVERYBODY,
         defaultChatStyle: {
@@ -153,6 +160,7 @@ function* createRecords({
         callsUseLessDataSetting: null,
         allowSealedSenderFromAnyone: null,
         allowAutomaticKeyVerification: null,
+        unreadBadgeType: null,
       },
       username: null,
       usernameLink: null,
@@ -163,7 +171,6 @@ function* createRecords({
       androidSpecificSettings: null,
       bioText: null,
       bioEmoji: null,
-      keyTransparencyData: null,
     },
   });
 
@@ -203,6 +210,7 @@ function* createRecords({
           contact: {
             aci: chatAci,
             blocked: false,
+            blockedAtTimestamp: null,
             visibility: Backups.Contact.Visibility.VISIBLE,
             registration: {
               registered: {},
@@ -240,6 +248,10 @@ function* createRecords({
         muteUntilMs: 0n,
         markedUnread: false,
         dontNotifyForMentionsIfMuted: false,
+        notifyForCallsIfMuted: null,
+        notifyForRepliesIfMuted: null,
+        notifyForMentionsIfMuted: null,
+        showUnreadReminders: null,
         style: {
           wallpaper: null,
           bubbleColor: {

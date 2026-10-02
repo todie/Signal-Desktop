@@ -1,7 +1,14 @@
 // Copyright 2020 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import React, { useCallback, useState, useMemo, useEffect } from 'react';
+import {
+  useCallback,
+  useState,
+  useMemo,
+  useEffect,
+  type RefObject,
+  type JSX,
+} from 'react';
 import lodash from 'lodash';
 import type { VideoFrameSource } from '@signalapp/ringrtc';
 import { GroupCallRemoteParticipant } from './GroupCallRemoteParticipant.dom.tsx';
@@ -28,6 +35,7 @@ import { MAX_FRAME_HEIGHT, MAX_FRAME_WIDTH } from '../calling/constants.std.ts';
 import { SizeObserver } from '../hooks/useSizeObserver.dom.tsx';
 import { strictAssert } from '../util/assert.std.ts';
 import type { CallingImageDataCache } from './CallManager.dom.tsx';
+import type { PropsType as SmartCallingParticipantMenuProps } from '../state/smart/CallingParticipantMenu.preload.tsx';
 
 const { clamp, chunk, maxBy, flatten, noop } = lodash;
 
@@ -62,10 +70,11 @@ type ParticipantTileType =
   | PaginationButtonType;
 
 type PropsType = {
+  callConversationId?: string;
   callViewMode: CallViewMode;
   getGroupCallVideoFrameSource: (demuxId: number) => VideoFrameSource;
   i18n: LocalizerType;
-  imageDataCache: React.RefObject<CallingImageDataCache | null>;
+  imageDataCache: RefObject<CallingImageDataCache | null>;
   isCallReconnecting: boolean;
   joinedAt: number | null;
   remoteParticipants: ReadonlyArray<GroupCallRemoteParticipantType>;
@@ -74,6 +83,9 @@ type PropsType = {
     speakerHeight: number
   ) => void;
   remoteAudioLevels: Map<number, number>;
+  renderCallingParticipantMenu: (
+    props: SmartCallingParticipantMenuProps
+  ) => JSX.Element;
   onClickRaisedHand?: () => void;
 };
 
@@ -115,6 +127,7 @@ enum VideoRequestMode {
 // 5. Lay out this arrangement on the screen.
 
 export function GroupCallRemoteParticipants({
+  callConversationId,
   callViewMode,
   getGroupCallVideoFrameSource,
   imageDataCache,
@@ -124,8 +137,9 @@ export function GroupCallRemoteParticipants({
   remoteParticipants,
   setGroupCallVideoRequest,
   remoteAudioLevels,
+  renderCallingParticipantMenu,
   onClickRaisedHand,
-}: PropsType): React.JSX.Element {
+}: PropsType): JSX.Element {
   const [gridDimensions, setGridDimensions] = useState<Dimensions>({
     width: 0,
     height: 0,
@@ -302,7 +316,7 @@ export function GroupCallRemoteParticipants({
     Math.round((gridDimensions.height - gridTotalRowHeightWithMargin) / 2)
   );
 
-  const rowElements: Array<Array<React.JSX.Element>> = gridArrangement.rows.map(
+  const rowElements: Array<Array<JSX.Element>> = gridArrangement.rows.map(
     (tiles, index) => {
       const top = gridTopOffset + index * gridParticipantHeightWithMargin;
 
@@ -357,6 +371,7 @@ export function GroupCallRemoteParticipants({
 
         return (
           <GroupCallRemoteParticipant
+            callConversationId={callConversationId}
             key={tile.demuxId}
             getFrameBuffer={getFrameBuffer}
             imageDataCache={imageDataCache}
@@ -370,6 +385,7 @@ export function GroupCallRemoteParticipants({
             top={top}
             width={renderedWidth}
             remoteParticipantsCount={remoteParticipants.length}
+            renderCallingParticipantMenu={renderCallingParticipantMenu}
             isActiveSpeakerInSpeakerView={isInSpeakerView}
             isCallReconnecting={isCallReconnecting}
             joinedAt={joinedAt}
@@ -531,6 +547,7 @@ export function GroupCallRemoteParticipants({
 
       {shouldShowOverflow && overflowedParticipants.length > 0 ? (
         <GroupCallOverflowArea
+          callConversationId={callConversationId}
           getFrameBuffer={getFrameBuffer}
           getGroupCallVideoFrameSource={getGroupCallVideoFrameSource}
           imageDataCache={imageDataCache}
@@ -542,6 +559,7 @@ export function GroupCallRemoteParticipants({
           overflowedParticipants={overflowedParticipants}
           remoteAudioLevels={remoteAudioLevels}
           remoteParticipantsCount={remoteParticipants.length}
+          renderCallingParticipantMenu={renderCallingParticipantMenu}
         />
       ) : null}
     </div>
@@ -586,6 +604,7 @@ function useInvisibleParticipants(
     const remoteParticipantDemuxIds = new Set<number>(
       remoteParticipants.map(r => r.demuxId)
     );
+    // oxlint-disable-next-line react/set-state-in-effect
     setInvisibleDemuxIds(oldInvisibleDemuxIds => {
       const staleIds = filter(
         oldInvisibleDemuxIds,
@@ -611,6 +630,7 @@ function useVideoRequestMode(): VideoRequestMode {
 
   useEffect(() => {
     if (isPageVisible) {
+      // oxlint-disable-next-line react/set-state-in-effect
       setResult(VideoRequestMode.Normal);
       return noop;
     }
@@ -724,7 +744,7 @@ function getGridParticipantsByPage({
       ...pageLayoutProps,
     });
 
-    let nextPage: ParticipantsInPageType<ParticipantTileType> | undefined;
+    let nextPage: ParticipantsInPageType | undefined;
 
     if (
       nextPageInSortedOrder.numParticipants ===
@@ -806,12 +826,9 @@ function getGridParticipantsByPage({
       break;
     }
 
-    const nextPageTiles =
-      nextPage as ParticipantsInPageType<ParticipantTileType>;
-
     // Add a previous page tile if needed
     if (pages.length > 0) {
-      const firstRow = nextPageTiles.rows[0];
+      const firstRow = nextPage.rows[0];
       strictAssert(firstRow, 'Missing firstRow');
       firstRow.unshift({
         isPaginationButton: true,
@@ -837,7 +854,7 @@ function getGridParticipantsByPage({
 
     // Add a next page tile if needed
     if (remainingParticipants.length) {
-      nextPageTiles.rows.at(-1)?.push({
+      nextPage.rows.at(-1)?.push({
         isPaginationButton: true,
         paginationButtonType: 'next',
         videoAspectRatio: PAGINATION_BUTTON_ASPECT_RATIO,

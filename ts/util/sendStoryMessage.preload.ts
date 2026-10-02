@@ -86,26 +86,25 @@ export async function sendStoryMessage(
 
       if (distributionList.id === MY_STORY_ID && distributionList.isBlockList) {
         const inBlockList = new Set<ServiceIdString>(distributionList.members);
-        distributionListMembers = getSignalConnections().reduce(
-          (acc, convo) => {
-            const uuid = convo.getServiceId();
-            if (!uuid) {
-              return acc;
-            }
-
-            if (inBlockList.has(uuid)) {
-              return acc;
-            }
-
-            if (convo.isEverUnregistered()) {
-              return acc;
-            }
-
-            acc.push(uuid);
+        distributionListMembers = getSignalConnections().reduce<
+          Array<ServiceIdString>
+        >((acc, convo) => {
+          const uuid = convo.getServiceId();
+          if (!uuid) {
             return acc;
-          },
-          [] as Array<ServiceIdString>
-        );
+          }
+
+          if (inBlockList.has(uuid)) {
+            return acc;
+          }
+
+          if (convo.isEverUnregistered()) {
+            return acc;
+          }
+
+          acc.push(uuid);
+          return acc;
+        }, []);
       } else {
         distributionListMembers = distributionList.members;
       }
@@ -181,7 +180,7 @@ export async function sendStoryMessage(
           seenStatus: SeenStatus.NotApplicable,
           sendStateByConversationId,
           sent_at: timestamp,
-          source: itemStorage.user.getNumber(),
+          source: itemStorage.user.getOptionalNumber(),
           sourceServiceId: itemStorage.user.getAci(),
           sourceDevice: itemStorage.user.getDeviceId(),
           storyDistributionListId: distributionList.id,
@@ -295,7 +294,7 @@ export async function sendStoryMessage(
         seenStatus: SeenStatus.NotApplicable,
         sendStateByConversationId,
         sent_at: groupTimestamp,
-        source: itemStorage.user.getNumber(),
+        source: itemStorage.user.getOptionalNumber(),
         sourceServiceId: itemStorage.user.getAci(),
         sourceDevice: itemStorage.user.getDeviceId(),
         timestamp: groupTimestamp,
@@ -336,6 +335,8 @@ export async function sendStoryMessage(
   // * Save the message models
   // * Add message to group conversation
   await Promise.all(
+    // FIXME
+    // oxlint-disable-next-line typescript/await-thenable
     conversationIds.map(conversationId => {
       const messageAttributes =
         groupV2MessagesByConversationId.get(conversationId);

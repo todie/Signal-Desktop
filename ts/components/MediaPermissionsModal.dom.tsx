@@ -1,18 +1,17 @@
 // Copyright 2025 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import React, { useCallback } from 'react';
-
-import { Modal } from './Modal.dom.tsx';
+import { useCallback, type JSX } from 'react';
 import { tw } from '../axo/tw.dom.tsx';
 import type { LocalizerType } from '../types/Util.std.ts';
 import { missingCaseError } from '../util/missingCaseError.std.ts';
-import { Button } from './Button.dom.tsx';
+import { AxoAlertDialog } from '../axo/AxoAlertDialog.dom.tsx';
 
 export type PropsType = {
   i18n: LocalizerType;
   mediaType: 'camera' | 'microphone';
   requestor: 'call' | 'voiceNote';
+  osName: 'macos' | 'windows';
   openSystemMediaPermissions: (mediaType: 'camera' | 'microphone') => void;
   onClose: () => void;
 };
@@ -21,9 +20,10 @@ export function MediaPermissionsModal({
   i18n,
   mediaType,
   requestor,
+  osName,
   openSystemMediaPermissions,
   onClose,
-}: PropsType): React.JSX.Element {
+}: PropsType): JSX.Element {
   let title: string;
   if (mediaType === 'camera') {
     title = i18n('icu:MediaPermissionsModal__title--camera');
@@ -47,43 +47,60 @@ export function MediaPermissionsModal({
     throw missingCaseError(requestor);
   }
 
+  let stepTwo: string;
+  if (osName === 'macos') {
+    stepTwo = i18n('icu:MediaPermissionsModal__step-2');
+  } else if (osName === 'windows') {
+    if (mediaType === 'camera') {
+      stepTwo = i18n('icu:MediaPermissionsModal__step-2--windows--camera');
+    } else if (mediaType === 'microphone') {
+      stepTwo = i18n('icu:MediaPermissionsModal__step-2--windows--microphone');
+    } else {
+      throw missingCaseError(mediaType);
+    }
+  } else {
+    throw missingCaseError(osName);
+  }
+
   const onClick = useCallback(
     () => openSystemMediaPermissions(mediaType),
     [openSystemMediaPermissions, mediaType]
   );
 
   return (
-    <Modal
-      modalName="MediaPermissionsModal"
-      hasXButton
-      i18n={i18n}
-      onClose={onClose}
-      moduleClassName="MediaPermissionsModal"
-    >
-      <div className="MediaPermissionsModal__body">
-        <h1>{title}</h1>
-        <p className="MediaPermissionsModal__subtitle">{subtitle}</p>
-        <ol className={tw('list-decimal')}>
-          <li>
-            {i18n('icu:MediaPermissionsModal__step-1', {
-              buttonName: i18n('icu:MediaPermissionsModal__open'),
-            })}
-          </li>
-          <li>
-            <img
-              className={tw('me-1 inline-block')}
-              alt=""
-              src="images/macos-switch.svg"
-              width={30}
-              height={20}
-            />
-            {i18n('icu:MediaPermissionsModal__step-2')}
-          </li>
-        </ol>
-        <Button onClick={onClick}>
-          {i18n('icu:MediaPermissionsModal__open')}
-        </Button>
-      </div>
-    </Modal>
+    <AxoAlertDialog.Root open onOpenChange={onClose}>
+      <AxoAlertDialog.Content escape="cancel-is-noop">
+        <AxoAlertDialog.Body>
+          <AxoAlertDialog.Title>{title}</AxoAlertDialog.Title>
+          <AxoAlertDialog.Description>
+            <p className={tw('mb-2')}>{subtitle}</p>
+            <ol className={tw('flex list-inside list-decimal flex-col gap-1')}>
+              <li>
+                {i18n('icu:MediaPermissionsModal__step-1', {
+                  buttonName: i18n('icu:MediaPermissionsModal__open'),
+                })}
+              </li>
+              <li>
+                {osName === 'macos' && (
+                  <img
+                    className={tw('me-1 inline-block')}
+                    alt=""
+                    src="images/macos-switch.svg"
+                    width={30}
+                    height={20}
+                  />
+                )}
+                {stepTwo}
+              </li>
+            </ol>
+          </AxoAlertDialog.Description>
+        </AxoAlertDialog.Body>
+        <AxoAlertDialog.Footer>
+          <AxoAlertDialog.Action variant="strong-primary" onClick={onClick}>
+            {i18n('icu:MediaPermissionsModal__open')}
+          </AxoAlertDialog.Action>
+        </AxoAlertDialog.Footer>
+      </AxoAlertDialog.Content>
+    </AxoAlertDialog.Root>
   );
 }

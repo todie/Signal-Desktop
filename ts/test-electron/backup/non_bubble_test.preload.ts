@@ -10,7 +10,6 @@ import * as Bytes from '../../Bytes.std.ts';
 import { SignalService as Proto, Backups } from '../../protobuf/index.std.ts';
 import { DataWriter } from '../../sql/Client.preload.ts';
 import { APPLICATION_OCTET_STREAM } from '../../types/MIME.std.ts';
-import { generateAci } from '../../types/ServiceId.std.ts';
 import { PaymentEventKind } from '../../types/Payment.std.ts';
 import { ContactFormType } from '../../types/EmbeddedContact.std.ts';
 import { MessageRequestResponseEvent } from '../../types/MessageRequestResponseEvent.std.ts';
@@ -25,6 +24,11 @@ import {
 } from './helpers.preload.ts';
 import { loadAllAndReinitializeRedux } from '../../services/allLoaders.preload.ts';
 import { itemStorage } from '../../textsecure/Storage.preload.ts';
+import {
+  generateAci,
+  generatePni,
+} from '../../test-helpers/serviceIdUtils.std.ts';
+import { Emoji } from '../../axo/emoji.std.ts';
 
 const CONTACT_A = generateAci();
 const GROUP_ID = Bytes.toBase64(getRandomBytes(32));
@@ -196,6 +200,37 @@ describe('backup/non-bubble messages', () => {
         sourceServiceId: CONTACT_A,
       },
     ]);
+  });
+
+  it('drops IDENTITY_VERIFIED simple update for PNI-only contact', async () => {
+    const pni = generatePni();
+    const pniContact = await window.ConversationController.getOrCreateAndWait(
+      pni,
+      'private',
+      {
+        systemGivenName: 'PNI_CONTACT',
+        active_at: 1,
+      }
+    );
+
+    await asymmetricRoundtripHarness(
+      [
+        {
+          conversationId: pniContact.id,
+          id: generateGuid(),
+          type: 'verified-change',
+          verifiedChanged: pniContact.id,
+          verified: true,
+          received_at: 1,
+          sent_at: 1,
+          timestamp: 1,
+          readStatus: ReadStatus.Read,
+          seenStatus: SeenStatus.Seen,
+          sourceServiceId: pni,
+        },
+      ],
+      []
+    );
   });
 
   it('roundtrips CHANGE_NUMBER simple update', async () => {
@@ -381,7 +416,7 @@ describe('backup/non-bubble messages', () => {
         ],
         reactions: [
           {
-            emoji: '👍',
+            emoji: Emoji.getDefaultVariant(Emoji.THUMBS_UP),
             fromId: contactA.id,
             targetTimestamp: 1,
             timestamp: 1,
@@ -389,6 +424,57 @@ describe('backup/non-bubble messages', () => {
         ],
       },
     ]);
+  });
+
+  it('drops empty embedded contact name on export', async () => {
+    await asymmetricRoundtripHarness(
+      [
+        {
+          conversationId: contactA.id,
+          id: generateGuid(),
+          type: 'incoming',
+          received_at: 1,
+          received_at_ms: 1,
+          sent_at: 1,
+          timestamp: 1,
+          sourceServiceId: CONTACT_A,
+          sourceDevice: 1,
+          readStatus: ReadStatus.Unread,
+          seenStatus: SeenStatus.Unseen,
+          unidentifiedDeliveryReceived: true,
+          contact: [
+            {
+              name: {
+                givenName: '',
+                familyName: undefined,
+              },
+              organization: 'Signal',
+            },
+          ],
+        },
+      ],
+      [
+        {
+          conversationId: contactA.id,
+          id: generateGuid(),
+          type: 'incoming',
+          received_at: 1,
+          received_at_ms: 1,
+          sent_at: 1,
+          timestamp: 1,
+          sourceServiceId: CONTACT_A,
+          sourceDevice: 1,
+          readStatus: ReadStatus.Unread,
+          seenStatus: SeenStatus.Unseen,
+          unidentifiedDeliveryReceived: true,
+          contact: [
+            {
+              organization: 'Signal',
+            },
+          ],
+        },
+      ]
+    );
   });
 
   it('roundtrips sticker', async () => {
@@ -408,7 +494,7 @@ describe('backup/non-bubble messages', () => {
         unidentifiedDeliveryReceived: true,
         // TODO (DESKTOP-6845): properly handle data FilePointer
         sticker: {
-          emoji: '👍',
+          emoji: Emoji.getDefaultVariant(Emoji.THUMBS_UP),
           packId: Bytes.toHex(getRandomBytes(16)),
           stickerId: 1,
           packKey: Bytes.toBase64(getRandomBytes(32)),
@@ -420,7 +506,7 @@ describe('backup/non-bubble messages', () => {
         },
         reactions: [
           {
-            emoji: '👍',
+            emoji: Emoji.getDefaultVariant(Emoji.THUMBS_UP),
             fromId: contactA.id,
             targetTimestamp: 1,
             timestamp: 1,
@@ -515,6 +601,30 @@ describe('backup/non-bubble messages', () => {
         },
       },
     ]);
+  });
+
+  it('drops title transition notification without username or e164', async () => {
+    await asymmetricRoundtripHarness(
+      [
+        {
+          conversationId: contactA.id,
+          id: generateGuid(),
+          type: 'title-transition-notification',
+          received_at: 1,
+          sent_at: 1,
+          timestamp: 1,
+          readStatus: ReadStatus.Read,
+          seenStatus: SeenStatus.Seen,
+          sourceServiceId: CONTACT_A,
+          titleTransition: {
+            renderInfo: {
+              type: 'private',
+            },
+          },
+        },
+      ],
+      []
+    );
   });
 
   it('roundtrips thread merge', async () => {

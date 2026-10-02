@@ -57,7 +57,7 @@ const HOST_LOG_ALLOWLIST = new Set([
   'sfu.voip.signal.org',
 ]);
 
-export class Agent extends HTTPSAgent {
+class Agent extends HTTPSAgent {
   constructor(options: AgentOptions = {}) {
     super({
       ...options,
@@ -158,8 +158,10 @@ export async function happyEyeballs({
             tlsOptions,
             abortSignal: abortController.signal,
           }),
-          CONNECT_TIMEOUT_MS,
-          'createHTTPSAgent.connect: connection timed out'
+          {
+            milliseconds: CONNECT_TIMEOUT_MS,
+            message: 'createHTTPSAgent.connect: connection timed out',
+          }
         );
       } catch (error) {
         abortController.abort();

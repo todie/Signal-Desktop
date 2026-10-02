@@ -8,7 +8,7 @@ import { createReadStream, createWriteStream } from 'node:fs';
 import { mkdir, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import fsExtra from 'fs-extra';
 import { basename, join } from 'node:path';
-import { createGzip, createGunzip } from 'node:zlib';
+import { createGunzip } from 'node:zlib';
 import { createCipheriv, createHmac, randomBytes } from 'node:crypto';
 import lodash from 'lodash';
 import { BackupLevel } from '@signalapp/libsignal-client/zkgroup.js';
@@ -26,7 +26,6 @@ import { getAbsoluteDownloadsPath } from '../../util/migrations.preload.ts';
 import { waitForAllBatchers } from '../../util/batcher.std.ts';
 import { flushAllWaitBatchers } from '../../util/waitBatcher.std.ts';
 import { DelimitedStream } from '../../util/DelimitedStream.node.ts';
-import { appendPaddingStream } from '../../util/logPadding.node.ts';
 import { prependStream } from '../../util/prependStream.node.ts';
 import { appendMacStream } from '../../util/appendMacStream.node.ts';
 import { getMacAndUpdateHmac } from '../../util/getMacAndUpdateHmac.node.ts';
@@ -55,6 +54,11 @@ import { runStorageServiceSyncJob } from '../storage.preload.ts';
 import { BackupExportStream } from './export.preload.ts';
 import { BackupImportStream } from './import.preload.ts';
 import {
+  toPaddedGzipIterable,
+  toDelimitedIterable,
+  toJSONIterable,
+} from './encoding.node.ts';
+import {
   getBackupId,
   getKeyMaterial,
   getLocalBackupMetadataKey,
@@ -63,7 +67,7 @@ import { BackupCredentials } from './credentials.preload.ts';
 import { BackupAPI } from './api.preload.ts';
 import {
   validateBackup,
-  validateBackupStream,
+  validateBackupIterator,
   ValidationType,
 } from './validator.preload.ts';
 import type {
@@ -83,7 +87,7 @@ import {
 import { FileStream } from './util/FileStream.node.ts';
 import { ToastType } from '../../types/Toast.dom.tsx';
 import { isAdhoc, isNightly } from '../../util/version.std.ts';
-import { isLocalBackupsEnabled } from '../../util/isLocalBackupsEnabled.preload.ts';
+import { isLocalBackupsEnabled } from '../../util/isLocalBackupsEnabled.dom.ts';
 import type { ValidateLocalBackupStructureResultType } from './util/localBackup.node.ts';
 import {
   writeLocalBackupMetadata,
@@ -108,6 +112,7 @@ import {
   unlink as unlinkAccount,
 } from '../../textsecure/WebAPI.preload.ts';
 import { itemStorage } from '../../textsecure/Storage.preload.ts';
+import { addSensitivePath } from '../../util/privacy.node.ts';
 import { LOCAL_BACKUP_VERSION } from './constants.std.ts';
 import { getTimestampForFolder } from '../../util/timestamp.std.ts';
 import { MEBIBYTE } from '../../types/AttachmentSize.std.ts';
@@ -117,7 +122,6 @@ import {
   StoragePermissionsError,
 } from '../../types/LocalExport.std.ts';
 import { getFreeDiskSpace } from '../../util/getFreeDiskSpace.node.ts';
-import { isFeaturedEnabledNoRedux } from '../../util/isFeatureEnabled.dom.ts';
 
 const { ensureFile, exists } = fsExtra;
 
@@ -661,14 +665,6 @@ export class BackupsService {
 
       await mkdir(exportDir, { recursive: true });
 
-      strictAssert(
-        isFeaturedEnabledNoRedux({
-          betaKey: 'desktop.plaintextExport.beta',
-          prodKey: 'desktop.plaintextExport.prod',
-        }),
-        'Plaintext export must be enabled'
-      );
-
       if (isOnline()) {
         await this.#waitForEmptyQueues('backups.exportPlaintext');
       } else {
@@ -755,14 +751,11 @@ export class BackupsService {
       const start = Date.now();
 
       window.IPC.startTrackingQueryStats();
-      const recordStream = new BackupExportStream({
-        ...exportOptions,
-        validationRun: true,
-      });
+      const exportStream = new BackupExportStream(exportOptions);
 
-      recordStream.run();
+      const { info, iterable } = exportStream.run();
 
-      const totalBytes = await validateBackupStream(recordStream);
+      const totalBytes = await validateBackupIterator(info, iterable);
       window.IPC.stopTrackingQueryStats({
         epochName: 'Internal Validate Backup',
       });
@@ -772,10 +765,10 @@ export class BackupsService {
       log.info('internal validation: succeeded');
       return {
         result: {
-          attachmentBackupJobs: recordStream.getAttachmentBackupJobs(),
-          mediaNames: recordStream.getMediaNames(),
+          attachmentBackupJobs: exportStream.getAttachmentBackupJobs(),
+          mediaNames: exportStream.getMediaNames(),
           duration,
-          stats: recordStream.getStats(),
+          stats: exportStream.getStats(),
           totalBytes,
         },
       };
@@ -1210,9 +1203,9 @@ export class BackupsService {
       }
 
       const { aesKey, macKey } = getKeyMaterial();
-      const recordStream = new BackupExportStream(options);
+      const exportStream = new BackupExportStream(options);
 
-      recordStream.run();
+      const runOutput = exportStream.run();
 
       const iv = randomBytes(IV_LENGTH);
 
@@ -1223,9 +1216,7 @@ export class BackupsService {
         case 'remote':
         case 'local-encrypted':
           await pipeline(
-            recordStream,
-            createGzip(),
-            appendPaddingStream(),
+            toPaddedGzipIterable(runOutput),
             createCipheriv(CipherType.AES256CBC, aesKey, iv),
             prependStream(iv),
             appendMacStream(macKey),
@@ -1244,7 +1235,7 @@ export class BackupsService {
             'exportBackup: Plaintext backups can be exported only in test harness'
           );
           await pipeline(
-            recordStream,
+            toDelimitedIterable(runOutput),
             measureSize({
               onComplete: size => {
                 totalBytes = size;
@@ -1256,7 +1247,7 @@ export class BackupsService {
           break;
         case 'plaintext-export':
           await pipeline(
-            recordStream,
+            toJSONIterable(runOutput, log),
             measureSize({
               onComplete: size => {
                 totalBytes = size;
@@ -1272,10 +1263,10 @@ export class BackupsService {
 
       const duration = Date.now() - start;
       return {
-        attachmentBackupJobs: recordStream.getAttachmentBackupJobs(),
-        mediaNames: recordStream.getMediaNames(),
+        attachmentBackupJobs: exportStream.getAttachmentBackupJobs(),
+        mediaNames: exportStream.getMediaNames(),
         totalBytes,
-        stats: recordStream.getStats(),
+        stats: exportStream.getStats(),
         duration,
       };
     } finally {
@@ -1455,6 +1446,7 @@ export class BackupsService {
     await mkdir(localBackupsBaseDir, { recursive: true });
 
     await itemStorage.put('localBackupFolder', localBackupsBaseDir);
+    addSensitivePath(localBackupsBaseDir);
     return localBackupsBaseDir;
   }
 
@@ -1484,10 +1476,21 @@ export class BackupsService {
         return;
       }
 
-      await rm(backupsBaseDir, { force: true, recursive: true });
+      await rm(backupsBaseDir, {
+        force: true,
+        recursive: true,
+        maxRetries: 10,
+      });
       log.info('disableLocalBackups: deleted backups directory');
     }
   }
 }
 
 export const backupsService = new BackupsService();
+
+itemStorage.onready(() => {
+  const localBackupFolder = itemStorage.get('localBackupFolder');
+  if (localBackupFolder) {
+    addSensitivePath(localBackupFolder);
+  }
+});

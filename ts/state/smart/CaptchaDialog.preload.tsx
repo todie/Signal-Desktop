@@ -1,6 +1,6 @@
 // Copyright 2021 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
-import React, { memo, useCallback } from 'react';
+import { memo, useCallback } from 'react';
 import { useSelector } from 'react-redux';
 import { CaptchaDialog } from '../../components/CaptchaDialog.dom.tsx';
 import { getIntl } from '../selectors/user.std.ts';
@@ -27,7 +27,7 @@ export const SmartCaptchaDialog = memo(function SmartCaptchaDialog({
   return (
     <CaptchaDialog
       i18n={i18n}
-      isPending={isPending}
+      pending={isPending}
       onSkip={onSkip}
       onContinue={handleContinue}
     />

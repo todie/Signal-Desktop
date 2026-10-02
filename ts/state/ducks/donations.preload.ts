@@ -15,7 +15,7 @@ import {
   DonationProcessor,
 } from '../../types/Donations.std.ts';
 import { drop } from '../../util/drop.std.ts';
-import { storageServiceUploadJob } from '../../services/storage.preload.ts';
+import { runStorageServiceUploadJob } from '../../services/storage.preload.ts';
 import { getMe } from '../selectors/conversations.dom.ts';
 import { actions as conversationActions } from './conversations.preload.ts';
 import type {
@@ -100,7 +100,7 @@ export type DonationsActionType = ReadonlyDeep<
 
 // Action Creators
 
-export function addReceipt(receipt: DonationReceipt): AddReceiptAction {
+function addReceipt(receipt: DonationReceipt): AddReceiptAction {
   return {
     type: ADD_RECEIPT,
     payload: { receipt },
@@ -228,7 +228,7 @@ function _submitStripeDonation({
     try {
       const { currentWorkflow } = getState().donations;
       if (
-        currentWorkflow?.type === donationStateSchema.Enum.INTENT &&
+        currentWorkflow?.type === donationStateSchema.enum.INTENT &&
         currentWorkflow.paymentAmount === paymentAmount &&
         currentWorkflow.currencyType === currencyType
       ) {
@@ -375,7 +375,7 @@ export function applyDonationBadge({
         badges: updatedBadges,
       };
 
-      await dispatch(
+      dispatch(
         conversationActions.myProfileChanged(profileData, { keepAvatar: true })
       );
       newDisplayBadgesOnProfile = true;
@@ -391,7 +391,7 @@ export function applyDonationBadge({
         badges: [],
       };
 
-      await dispatch(
+      dispatch(
         conversationActions.myProfileChanged(profileData, { keepAvatar: true })
       );
       newDisplayBadgesOnProfile = false;
@@ -404,7 +404,7 @@ export function applyDonationBadge({
     ) {
       await storage.put('displayBadgesOnProfile', newDisplayBadgesOnProfile);
       if (previousDisplayBadgesOnProfile !== newDisplayBadgesOnProfile) {
-        storageServiceUploadJob({ reason: 'donation-badge-toggle' });
+        runStorageServiceUploadJob({ reason: 'donation-badge-toggle' });
       }
     }
 
@@ -487,7 +487,7 @@ export function reducer(
 
     // If we've cleared the workflow or are starting afresh, we clear the startup flag
     const didResumeWorkflowAtStartup =
-      !nextWorkflow || nextWorkflow.type === donationStateSchema.Enum.INTENT
+      !nextWorkflow || nextWorkflow.type === donationStateSchema.enum.INTENT
         ? false
         : state.didResumeWorkflowAtStartup;
 

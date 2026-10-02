@@ -19,18 +19,22 @@ import {
   LONG_MESSAGE,
 } from '../types/MIME.std.ts';
 import type { MessageAttributesType } from '../model-types.d.ts';
-import { generateAci } from '../types/ServiceId.std.ts';
 import { ReadStatus } from '../messages/MessageReadStatus.std.ts';
 import { SeenStatus } from '../MessageSeenStatus.std.ts';
 import { DataWriter, DataReader } from '../sql/Client.preload.ts';
 import { strictAssert } from '../util/assert.std.ts';
-import { HOUR, MINUTE } from '../util/durations/index.std.ts';
+import {
+  HOUR,
+  MINUTE,
+  DurationInSeconds,
+} from '../util/durations/index.std.ts';
 import {
   testAttachmentDigest,
   testAttachmentKey,
   testAttachmentLocalKey,
   testPlaintextHash,
 } from '../test-helpers/attachments.node.ts';
+import { generateAci } from '../test-helpers/serviceIdUtils.std.ts';
 
 const CONTACT_A = generateAci();
 const contactAConversationId = generateGuid();
@@ -91,7 +95,6 @@ function composeAttachment(
     cdnNumber: 3,
     key: testAttachmentKey(),
     digest: testAttachmentDigest(),
-    duration: 123,
     size: 100,
     downloadPath: 'downloadPath',
     contentType: IMAGE_JPEG,
@@ -128,6 +131,8 @@ function composeAttachment(
     thumbnail: composeThumbnail(index),
     screenshot: composeScreenshot(index),
     thumbnailFromBackup: composeBackupThumbnail(index),
+    audioWaveform: [1, 2, 3],
+    duration: DurationInSeconds.fromSeconds(123),
     ...overrides,
   } as const;
 

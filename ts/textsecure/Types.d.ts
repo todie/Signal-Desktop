@@ -17,8 +17,16 @@ import type { DurationInSeconds } from '../util/durations/index.std.ts';
 import type { AnyPaymentEvent } from '../types/Payment.std.ts';
 import type { RawBodyRange } from '../types/BodyRange.std.ts';
 import type { StoryMessageRecipientsType } from '../types/Stories.std.ts';
+import type { Emoji } from '../axo/emoji.std.ts';
+import type { EmbeddedContactType } from '../types/EmbeddedContact.std.ts';
+import type {
+  DurationSecs,
+  ReceivedTimestampMs,
+  SentTimestampMs,
+  ServerTimestampMs,
+} from '@signalapp/types';
 
-export {
+export type {
   IdentityKeyType,
   IdentityKeyIdType,
   KyberPreKeyType,
@@ -85,20 +93,20 @@ export type SessionResetsType = Record<string, number>;
 export type ProcessedEnvelope = Readonly<{
   id: string;
   receivedAtCounter: number;
-  receivedAtDate: number;
+  receivedAtDate: ReceivedTimestampMs;
   messageAgeSec: number;
 
   // Mostly from Proto.Envelope except for null/undefined
   type: Proto.Envelope.Type;
   source: string | undefined;
   sourceServiceId: ServiceIdString | undefined;
-  sourceDevice: number | Undefined;
+  sourceDevice: number | undefined;
   destinationServiceId: ServiceIdString;
   updatedPni: PniString | undefined;
-  timestamp: number;
+  timestamp: SentTimestampMs;
   content: Uint8Array<ArrayBuffer>;
   serverGuid: string;
-  serverTimestamp: number;
+  serverTimestamp: ServerTimestampMs;
   groupId: string | undefined;
   urgent: boolean;
   story: boolean;
@@ -126,6 +134,8 @@ export type ProcessedAttachment = {
   downloadPath?: string;
   incrementalMac?: string;
   chunkSize?: number;
+  duration?: number;
+  audioWaveform?: ReadonlyArray<number>;
 };
 
 export type ProcessedGroupV2Context = {
@@ -159,12 +169,15 @@ export type ProcessedAvatar = {
   isProfile: boolean;
 };
 
-export type ProcessedContact = Omit<Proto.DataMessage.Contact, 'avatar'> & {
+export type ProcessedContact = Omit<
+  EmbeddedContactType,
+  'avatar' | 'firstNumber' | 'serviceId'
+> & {
   avatar?: ProcessedAvatar;
 };
 
 export type ProcessedPreview = {
-  url?: string;
+  url: string;
   title?: string;
   image?: ProcessedAttachment;
   description?: string;
@@ -172,15 +185,15 @@ export type ProcessedPreview = {
 };
 
 export type ProcessedSticker = {
-  packId?: string;
-  packKey?: string;
-  stickerId?: number;
-  emoji?: string;
+  packId: string;
+  packKey: string;
+  stickerId: number;
+  emoji?: Emoji.Variant;
   data?: ProcessedAttachment;
 };
 
 export type ProcessedReaction = {
-  emoji?: string;
+  emoji?: Emoji.Variant;
   remove: boolean;
   targetAuthorAci?: AciString;
   targetTimestamp?: number;
@@ -188,8 +201,8 @@ export type ProcessedReaction = {
 
 export type ProcessedPinMessage = Readonly<{
   targetAuthorAci: AciString;
-  targetSentTimestamp: number;
-  pinDuration: DurationInSeconds | null;
+  targetSentTimestamp: SentTimestampMs;
+  pinDuration: DurationSecs | null;
 }>;
 
 export type ProcessedPollCreate = {
@@ -317,14 +330,14 @@ export type CallbackResultType = {
   contentHint?: number;
   contentProto?: Uint8Array<ArrayBuffer>;
   timestamp?: number;
-  recipients?: Record<ServiceIdString, Array<number>>;
+  recipients?: Record<ServiceIdString, ReadonlyArray<number>>;
   urgent?: boolean;
   hasPniSignatureMessage?: boolean;
 };
 
 export type IRequestHandler = {
-  handleRequest(request: IncomingWebSocketRequest): void;
-  handleDisconnect(): void;
+  handleRequest: (request: IncomingWebSocketRequest) => void;
+  handleDisconnect: () => void;
 };
 
 export type PniKeyMaterialType = Readonly<{

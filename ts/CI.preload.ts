@@ -4,8 +4,6 @@
 import { format } from 'node:util';
 import { ipcRenderer } from 'electron';
 
-import type { IPCResponse as ChallengeResponseType } from './challenge.dom.ts';
-import type { MessageAttributesType } from './model-types.d.ts';
 import { createLogger } from './logging/log.std.ts';
 import { explodePromise } from './util/explodePromise.std.ts';
 import { AccessType, ipcInvoke } from './sql/channels.preload.ts';
@@ -18,9 +16,15 @@ import { SECOND } from './util/durations/index.std.ts';
 import { isSignalRoute } from './util/signalRoutes.std.ts';
 import { strictAssert } from './util/assert.std.ts';
 import { MessageModel } from './models/messages.preload.ts';
-import type { SocketStatuses } from './textsecure/SocketManager.preload.ts';
 import { itemStorage } from './textsecure/Storage.preload.ts';
 import { BackupLevel } from './services/backups/types.std.ts';
+import { fromHex } from './Bytes.std.ts';
+
+import type { IPCResponse as ChallengeResponseType } from './challenge.dom.ts';
+import type { MessageAttributesType } from './model-types.d.ts';
+import type { SocketStatuses } from './textsecure/SocketManager.preload.ts';
+import type { RestoreResponseType } from './textsecure/WebAPI.preload.ts';
+import { runStorageServiceSyncJob } from './services/storage.preload.ts';
 
 const log = createLogger('CI');
 
@@ -30,9 +34,9 @@ export type CIType = {
   deviceName: string;
   getConversationId: (address: string | null) => string | null;
   createNotificationToken: (address: string) => string | undefined;
-  getMessagesBySentAt(
+  getMessagesBySentAt: (
     sentAt: number
-  ): Promise<ReadonlyArray<MessageAttributesType>>;
+  ) => Promise<ReadonlyArray<MessageAttributesType>>;
   getPendingEventCount: (event: string) => number;
   getSocketStatus: () => SocketStatuses;
   handleEvent: (event: string, data: unknown) => unknown;
@@ -46,18 +50,22 @@ export type CIType = {
       ignorePastEvents?: boolean;
     }
   ) => unknown;
-  openSignalRoute(url: string): Promise<void>;
-  migrateAllMessages(): Promise<void>;
-  exportLocalBackup(backupsBaseDir: string): Promise<string>;
-  stageLocalBackupForImport(snapshotDir: string): Promise<void>;
-  uploadBackup(): Promise<void>;
+  openSignalRoute: (url: string) => Promise<void>;
+  migrateAllMessages: () => Promise<void>;
+  exportLocalBackup: (backupsBaseDir: string) => Promise<string>;
+  stageLocalBackupForImport: (snapshotDir: string) => Promise<void>;
+  uploadBackup: () => Promise<void>;
   unlink: () => void;
   print: (...args: ReadonlyArray<unknown>) => void;
-  resetReleaseNoteAndMegaphoneFetcher(): void;
+  resetReleaseNoteAndMegaphoneFetcher: () => void;
   forceUnprocessed: boolean;
-  setMediaPermissions(): Promise<void>;
+  setMediaPermissions: () => Promise<void>;
   maybeUpdateMaxAudioLevel: (level: number) => void;
   getAndResetMaxAudioLevel: () => number | undefined;
+  startStandaloneRegistration: () => void;
+  saveSVR2RestoreResponse: (response: RestoreResponseType) => void;
+  getSVR2RestoreResponse: () => RestoreResponseType | undefined;
+  fetchManifestForPrimary: () => void;
 };
 
 export type GetCIOptionsType = Readonly<{
@@ -216,7 +224,7 @@ export function getCI({
     const { error } =
       await backupsService.stageLocalBackupForImport(snapshotDir);
     if (error) {
-      throw error;
+      throw new Error(error);
     }
   }
 
@@ -271,6 +279,32 @@ export function getCI({
     return level;
   }
 
+  function startStandaloneRegistration() {
+    window.reduxActions.app.openStandalone();
+  }
+
+  let svr2RestoreResponse: RestoreResponseType | undefined;
+  function saveSVR2RestoreResponse(response: RestoreResponseType): void {
+    if (response.success) {
+      svr2RestoreResponse = {
+        ...response,
+        // @ts-expect-error We need to get this data through JSON
+        data: fromHex(response.data),
+      };
+
+      return;
+    }
+
+    svr2RestoreResponse = response;
+  }
+  function getSVR2RestoreResponse(): RestoreResponseType | undefined {
+    return svr2RestoreResponse;
+  }
+
+  function fetchManifestForPrimary(): void {
+    runStorageServiceSyncJob({ reason: 'fetchManifestForPrimary' });
+  }
+
   return {
     deviceName,
     getConversationId,
@@ -295,5 +329,9 @@ export function getCI({
     setMediaPermissions,
     maybeUpdateMaxAudioLevel,
     getAndResetMaxAudioLevel,
+    startStandaloneRegistration,
+    saveSVR2RestoreResponse,
+    getSVR2RestoreResponse,
+    fetchManifestForPrimary,
   };
 }

@@ -4,7 +4,14 @@
     "app/**/*",
     "package.json",
     "build/intl-linter/**/*.ts",
-    ".oxlint/**/*"
+    ".oxlint/**/*",
+    "scripts/**/*",
+    "codemods/**/*",
+    "test/test.mjs",
+    ".babelrc.mjs",
+    ".prettierrc.mjs",
+    ".stylelintrc.mjs",
+    "knip.js"
   ],
   "compilerOptions": {
     /*
@@ -16,7 +23,7 @@
      */
 
     /* Save .tsbuildinfo files to allow for incremental compilation of projects. */
-    "incremental": true,
+    "incremental": false,
     /* Enable constraints that allow a TypeScript project to be used with project references. */
     "composite": false,
     /* Specify the path to .tsbuildinfo incremental compilation file. */
@@ -41,7 +48,7 @@
       "ESNext"
     ],
     /* Specify what JSX code is generated. */
-    "jsx": "react",
+    "jsx": "react-jsx",
     /* Enable experimental support for legacy experimental decorators. */
     // "experimentalDecorators": true,
     /* Emit design-type metadata for decorated declarations in source files. */
@@ -66,11 +73,11 @@
      */
 
     /* Specify what module code is generated. */
-    "module": "ES2022",
+    "module": "ESNext",
     /* Specify the root folder within your source files. */
     "rootDir": "./",
     /* Specify how TypeScript looks up a file from a given module specifier. */
-    "moduleResolution": "Node",
+    "moduleResolution": "Bundler",
     /* Specify the base directory to resolve non-relative module names. */
     // "baseUrl": "./",
     /* Specify a set of entries that re-map imports to additional lookup locations. */
@@ -80,7 +87,7 @@
     /* Specify multiple folders that act like './node_modules/@types'. */
     // "typeRoots": [],
     /* Specify type package names to be included without being referenced in a source file. */
-    // "types": [],
+    "types": ["@types/dom-mediacapture-transform"],
     /* Allow accessing UMD globals from modules. */
     // "allowUmdGlobalAccess": true,
     /* List of file name suffixes to search when resolving a module. */
@@ -88,9 +95,9 @@
     /* Allow imports to include TypeScript file extensions. Requires '--moduleResolution bundler' and either '--noEmit' or '--emitDeclarationOnly' to be set. */
     "allowImportingTsExtensions": true,
     /* Use the package.json 'exports' field when resolving package imports. */
-    // "resolvePackageJsonExports": true,
+    "resolvePackageJsonExports": true,
     /* Use the package.json 'imports' field when resolving imports. */
-    // "resolvePackageJsonImports": true,
+    "resolvePackageJsonImports": true,
     /* Conditions to set in addition to the resolver-specific defaults when resolving imports. */
     // "customConditions": [],
     /* Check side effect imports. */
@@ -232,17 +239,5 @@
     // "skipDefaultLibCheck": true,
     /* Skip type checking all .d.ts files. */
     "skipLibCheck": true
-  },
-
-  /**
-   * ts-node
-   */
-  "ts-node": {
-    "transpileOnly": true,
-    // Override TypeScript options for `ts-node` only
-    "compilerOptions": {
-      // Necessary for `ts-node` to work with CommonJS modules until we migrate to package.json#type: "module"
-      "module": "CommonJS"
-    }
   }
 }

@@ -1,12 +1,11 @@
 // Copyright 2019 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import React, { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import classNames from 'classnames';
 
-import type { ReactNode } from 'react';
-
-import { getInteractionMode } from '../../services/InteractionMode.dom.ts';
+import type { ReactNode, JSX, MouseEvent, KeyboardEvent } from 'react';
+import { TargetedMessageSource } from '../../state/ducks/conversationsEnums.std.ts';
 
 export type Props = {
   id: string;
@@ -14,7 +13,11 @@ export type Props = {
   isTargeted: boolean;
   isSelectMode: boolean;
   isSelected: boolean;
-  targetMessage: (messageId: string, conversationId: string) => unknown;
+  targetMessage: (
+    messageId: string,
+    conversationId: string,
+    targetedMessageSource: TargetedMessageSource
+  ) => unknown;
   toggleSelectMessage: (
     conversationId: string,
     messageId: string,
@@ -33,7 +36,7 @@ export function InlineNotificationWrapper({
   targetMessage,
   toggleSelectMessage,
   children,
-}: Props): React.JSX.Element {
+}: Props): JSX.Element {
   const focusRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -46,9 +49,7 @@ export function InlineNotificationWrapper({
   }, [isTargeted]);
 
   const handleFocus = useCallback(() => {
-    if (getInteractionMode() === 'keyboard') {
-      targetMessage(id, conversationId);
-    }
+    targetMessage(id, conversationId, TargetedMessageSource.Focus);
   }, [id, conversationId, targetMessage]);
 
   if (isSelectMode) {
@@ -62,12 +63,12 @@ export function InlineNotificationWrapper({
         tabIndex={0}
         ref={focusRef}
         onFocus={handleFocus}
-        onClick={(event: React.MouseEvent<HTMLSpanElement>) => {
+        onClick={(event: MouseEvent<HTMLSpanElement>) => {
           toggleSelectMessage(conversationId, id, event.shiftKey, !isSelected);
           event.stopPropagation();
           event.preventDefault();
         }}
-        onKeyDown={(event: React.KeyboardEvent<HTMLSpanElement>) => {
+        onKeyDown={(event: KeyboardEvent<HTMLSpanElement>) => {
           if (event.code === 'Space') {
             toggleSelectMessage(
               conversationId,

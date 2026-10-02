@@ -1,8 +1,8 @@
 // Copyright 2021 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import React, { useCallback } from 'react';
-import type { RefObject } from 'react';
+import { useCallback, useState } from 'react';
+import type { RefObject, JSX, ReactElement } from 'react';
 import classNames from 'classnames';
 import lodash from 'lodash';
 import { animated, useSpring } from '@react-spring/web';
@@ -14,7 +14,7 @@ import type { PushPanelForConversationActionType } from '../../state/ducks/conve
 import { isDownloaded } from '../../util/Attachment.std.ts';
 import type { DirectionType } from './Message.dom.tsx';
 
-import type { ComputePeaksResult } from '../VoiceNotesPlaybackContext.dom.tsx';
+import type { ComputeWaveformResult } from '../VoiceNotesPlaybackContext.dom.tsx';
 import { MessageMetadata } from './MessageMetadata.dom.tsx';
 import { createLogger } from '../../logging/log.std.ts';
 import type { ActiveAudioPlayerStateType } from '../../state/ducks/audioPlayer.preload.ts';
@@ -54,10 +54,10 @@ export type OwnProps = Readonly<{
   status?: MessageStatusType;
   textPending?: boolean;
   timestamp: number;
-  cancelAttachmentDownload(): void;
-  kickOffAttachmentDownload(): void;
-  onCorrupted(): void;
-  computePeaks(url: string, barCount: number): Promise<ComputePeaksResult>;
+  cancelAttachmentDownload: () => void;
+  kickOffAttachmentDownload: () => void;
+  onCorrupted: () => void;
+  computeWaveform: (url: string) => Promise<ComputeWaveformResult>;
   onPlayMessage: (id: string, position: number) => void;
 }>;
 
@@ -143,7 +143,7 @@ function PlayedDot({
  * `context` is required for displaying separate MessageAudio instances in
  * MessageDetails and Message React components.
  */
-export function MessageAudio(props: Props): React.JSX.Element {
+export function MessageAudio(props: Props): JSX.Element {
   const {
     active,
     buttonRef,
@@ -175,7 +175,7 @@ export function MessageAudio(props: Props): React.JSX.Element {
 
   const isPlaying = active?.playing ?? false;
 
-  const [isPlayedDotVisible, setIsPlayedDotVisible] = React.useState(!played);
+  const [isPlayedDotVisible, setIsPlayedDotVisible] = useState(!played);
 
   const audioUrl = isDownloaded(attachment) ? attachment.url : undefined;
 
@@ -184,6 +184,8 @@ export function MessageAudio(props: Props): React.JSX.Element {
     activeDuration: active?.duration,
     barCount: BAR_COUNT,
     onCorrupted,
+    waveform: attachment.audioWaveform,
+    duration: attachment.duration,
   });
 
   let state: State;
@@ -284,7 +286,7 @@ export function MessageAudio(props: Props): React.JSX.Element {
     />
   );
 
-  let button: React.ReactElement;
+  let button: ReactElement;
   if (state === State.Computing) {
     // Not really a button, but who cares?
     button = (

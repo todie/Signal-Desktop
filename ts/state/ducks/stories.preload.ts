@@ -15,7 +15,7 @@ import type {
   MessagesAddedActionType,
   TargetedConversationChangedActionType,
 } from './conversations.preload.ts';
-import type { NoopActionType } from './noop.std.ts';
+import { noopAction, type NoopActionType } from './noop.std.ts';
 import type { StateType as RootStateType } from '../reducer.preload.ts';
 import type {
   StoryViewTargetType,
@@ -84,6 +84,7 @@ import { ReceiptType } from '../../types/Receipt.std.ts';
 import { cleanupMessages } from '../../util/cleanup.preload.ts';
 import { AttachmentDownloadUrgency } from '../../types/AttachmentDownload.std.ts';
 import { itemStorage } from '../../textsecure/Storage.preload.ts';
+import type { Emoji } from '../../axo/emoji.std.ts';
 
 const { isEqual, pick } = lodash;
 
@@ -320,10 +321,7 @@ function deleteGroupStoryReplyForEveryone(
 
     // the call above re-uses the sync-message processing code to update the UI
     // we don't need to do anything here
-    dispatch({
-      type: 'NOOP',
-      payload: null,
-    });
+    dispatch(noopAction('deleteGroupStoryReplyForEveryone'));
   };
 }
 
@@ -455,7 +453,7 @@ function markStoryRead(
 
     if (
       !isSignalOnboardingStory &&
-      !window.ConversationController.areWePrimaryDevice()
+      window.ConversationController.doWeHaveOtherDevices()
     ) {
       drop(viewSyncJobQueue.add({ viewSyncs }));
     }
@@ -535,10 +533,6 @@ function queueStoryDownload(
     const message = await getMessageById(storyId);
 
     if (message) {
-      // We want to ensure that we re-hydrate the story reply context with the
-      // completed attachment download.
-      message.set({ storyReplyContext: undefined });
-
       dispatch({
         type: QUEUE_STORY_DOWNLOAD,
         payload: storyId,
@@ -555,15 +549,12 @@ function queueStoryDownload(
       return;
     }
 
-    dispatch({
-      type: 'NOOP',
-      payload: null,
-    });
+    dispatch(noopAction('queueStoryDownload'));
   };
 }
 
 function reactToStory(
-  nextReaction: string,
+  nextReaction: Emoji.Variant,
   messageId: string
 ): ThunkAction<
   void,
@@ -578,10 +569,7 @@ function reactToStory(
         emoji: nextReaction,
         remove: false,
       });
-      dispatch({
-        type: 'NOOP',
-        payload: null,
-      });
+      dispatch(noopAction('reactToStory'));
     } catch (error) {
       log.error('Error enqueuing reaction', error, messageId, nextReaction);
       dispatch({
@@ -1455,10 +1443,7 @@ function removeAllContactStories(
 
     await DataWriter.removeMessagesById(messageIds, { cleanupMessages });
 
-    dispatch({
-      type: 'NOOP',
-      payload: null,
-    });
+    dispatch(noopAction('removeAllContactStories'));
   };
 }
 

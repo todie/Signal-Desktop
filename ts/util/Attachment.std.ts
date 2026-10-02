@@ -11,7 +11,6 @@ import type {
   AttachmentWithHydratedData,
   BackupableAttachmentType,
   AttachmentDownloadableFromTransitTier,
-  LocallySavedAttachment,
   AttachmentReadyForLocalBackup,
 } from '../types/Attachment.std.ts';
 import type { LoggerType } from '../types/Logging.std.ts';
@@ -40,6 +39,7 @@ const {
   isString,
   omit,
   partition,
+  takeWhile,
 } = lodash;
 
 const logging = createLogger('Attachment');
@@ -76,7 +76,7 @@ const MAX_DISPLAYABLE_IMAGE_HEIGHT = 8192;
 // Returns true if `rawAttachment` is a valid attachment based on our current schema.
 // Over time, we can expand this definition to become more narrow, e.g. require certain
 // fields, etc.
-export function isValid(
+function isValid(
   rawAttachment?: Pick<AttachmentType, 'data' | 'path'>
 ): rawAttachment is AttachmentType {
   // NOTE: We cannot use `_.isPlainObject` because `rawAttachment` is
@@ -164,10 +164,6 @@ export function removeSchemaVersion({
   return omit(attachment, 'schemaVersion');
 }
 
-export function hasData(attachment: AttachmentType): boolean {
-  return attachment.data instanceof Uint8Array;
-}
-
 export function loadData(
   readAttachmentV2Data: (
     attachment: Partial<AddressableAttachmentType>
@@ -207,7 +203,7 @@ export function getExtensionForDisplay({
   fileName?: string;
   contentType: MIME.MIMEType;
 }): string | undefined {
-  if (fileName && fileName.indexOf('.') >= 0) {
+  if (fileName && fileName.includes('.')) {
     const lastPeriod = fileName.lastIndexOf('.');
     const extension = fileName.slice(lastPeriod + 1);
     if (extension.length) {
@@ -237,33 +233,12 @@ export function isAudio(attachments?: ReadonlyArray<AttachmentType>): boolean {
   );
 }
 
-export function canRenderAudio(
-  attachments?: ReadonlyArray<AttachmentType>
-): boolean {
-  const firstAttachment = attachments && attachments[0];
-  if (!firstAttachment) {
-    return false;
-  }
+export function areDimensionsDisplayable(attachment: AttachmentType): boolean {
+  const { height, width } = attachment;
 
   return (
-    isAudio(attachments) &&
-    (isDownloaded(firstAttachment) || isDownloadable(firstAttachment))
-  );
-}
-
-export function canDisplayImage(
-  attachments?: ReadonlyArray<AttachmentType>
-): boolean {
-  const { height, width } =
-    attachments && attachments[0] ? attachments[0] : { height: 0, width: 0 };
-
-  return Boolean(
-    height &&
-    height > 0 &&
-    height <= MAX_DISPLAYABLE_IMAGE_HEIGHT &&
-    width &&
-    width > 0 &&
-    width <= MAX_DISPLAYABLE_IMAGE_WIDTH
+    (!height || height <= MAX_DISPLAYABLE_IMAGE_HEIGHT) &&
+    (!width || width <= MAX_DISPLAYABLE_IMAGE_WIDTH)
   );
 }
 
@@ -344,12 +319,10 @@ export function isVideoAttachment(
   return isVideoTypeSupported(attachment.contentType);
 }
 
-export function isGIF(attachments?: ReadonlyArray<AttachmentType>): boolean {
-  if (!attachments || attachments.length !== 1) {
+export function isGIF(attachment?: AttachmentType): boolean {
+  if (!attachment) {
     return false;
   }
-
-  const [attachment] = attachments;
 
   const flag = SignalService.AttachmentPointer.Flags.GIF;
   const hasFlag =
@@ -412,14 +385,6 @@ export function isDownloading(attachment?: AttachmentType): boolean {
 export function hasFailed(attachment?: AttachmentType): boolean {
   const resolved = resolveNestedAttachment(attachment);
   return Boolean(resolved && resolved.error);
-}
-
-export function hasVideoBlurHash(
-  attachments?: ReadonlyArray<AttachmentType>
-): boolean {
-  const firstAttachment = attachments ? attachments[0] : null;
-
-  return Boolean(firstAttachment && firstAttachment.blurHash);
 }
 
 export function hasVideoScreenshot(
@@ -569,10 +534,6 @@ export const isVisualMedia = (attachment: AttachmentType): boolean => {
 export const isFile = (attachment: AttachmentType): boolean => {
   const { contentType } = attachment;
 
-  if (isUndefined(contentType)) {
-    return false;
-  }
-
   if (isVisualMedia(attachment)) {
     return false;
   }
@@ -704,7 +665,7 @@ export const getSuggestedFilename = ({
   }
 
   const suffix = timestamp
-    ? moment(timestamp).format('-YYYY-MM-DD-HHmmss')
+    ? moment(timestamp).format('-YYYY-MM-DD-HH-mm-ss-SSS')
     : '';
   const fileType = getFileExtension(attachment);
   const extension = fileType ? `.${fileType}` : '';
@@ -728,6 +689,8 @@ export const getFileExtension = (
       return 'mov';
     case 'audio/mpeg':
       return 'mp3';
+    case 'image/jpeg':
+      return 'jpg';
     default:
       return attachment.contentType.split('/')[1];
   }
@@ -840,7 +803,7 @@ export function canAttachmentHaveThumbnail({
   return isVideoTypeSupported(contentType) || isImageTypeSupported(contentType);
 }
 
-export function hasRequiredInformationToDownloadFromTransitTier(
+export function isDownloadableFromTransitTier(
   attachment: AttachmentType
 ): attachment is AttachmentDownloadableFromTransitTier {
   const hasIntegrityCheck =
@@ -861,31 +824,26 @@ export function hasRequiredInformationToDownloadFromTransitTier(
   return true;
 }
 
-export function shouldAttachmentEndUpInRemoteBackup({
-  attachment,
-  hasMediaBackups,
-}: {
-  attachment: AttachmentType;
-  hasMediaBackups: boolean;
-}): boolean {
-  return hasMediaBackups && hasRequiredInformationForRemoteBackup(attachment);
-}
-
-export function isDownloadable(attachment: AttachmentType): boolean {
+export function isDownloadable(
+  attachment: AttachmentType,
+  { hasMediaBackups }: { hasMediaBackups: boolean }
+): boolean {
   return (
-    hasRequiredInformationToDownloadFromTransitTier(attachment) ||
-    shouldAttachmentEndUpInRemoteBackup({
-      attachment,
-      // TODO: DESKTOP-8905
-      hasMediaBackups: true,
-    })
+    hasRequiredInformationForLocalBackup(attachment) ||
+    isDownloadableFromTransitTier(attachment) ||
+    isDownloadableFromBackupTier(attachment, { hasMediaBackups })
   );
 }
 
-export function isAttachmentLocallySaved(
-  attachment: AttachmentType
-): attachment is LocallySavedAttachment {
-  return Boolean(attachment.path);
+export function isDownloadableFromBackupTier(
+  attachment: AttachmentType,
+  {
+    hasMediaBackups,
+  }: {
+    hasMediaBackups: boolean;
+  }
+): attachment is BackupableAttachmentType {
+  return hasMediaBackups && hasRequiredInformationForRemoteBackup(attachment);
 }
 
 // We now partition out the bodyAttachment on receipt, but older
@@ -933,8 +891,53 @@ export function partitionBodyAndNormalAttachments<
   };
 }
 
-const MESSAGE_ATTACHMENT_TYPES_NEEDING_THUMBNAILS: Set<MessageAttachmentType> =
-  new Set(['attachment', 'sticker']);
+export function getMessageAttachmentClass(
+  attachments: ReadonlyArray<AttachmentType>
+): 'file' | 'visual-media' | 'gif' | 'audio' | 'voice' | 'unknown' {
+  const first = attachments[0];
+  if (!first) {
+    return 'unknown';
+  }
+  if (isVoiceMessage(first)) {
+    return 'voice';
+  }
+  if (isGIF(first)) {
+    return 'gif';
+  }
+  if (isAudio(attachments)) {
+    return 'audio';
+  }
+  if (isImageAttachment(first) || isVideoAttachment(first)) {
+    return 'visual-media';
+  }
+  return 'file';
+}
+
+export function getValidMessageAttachments(
+  attachments: ReadonlyArray<AttachmentType>
+): ReadonlyArray<AttachmentType> {
+  if (attachments.length <= 1) {
+    return attachments;
+  }
+  const [first] = attachments;
+  if (first == null) {
+    return [];
+  }
+
+  if (getMessageAttachmentClass(attachments) === 'visual-media') {
+    return takeWhile(
+      attachments,
+      attachment =>
+        isImageAttachment(attachment) || isVideoAttachment(attachment)
+    );
+  }
+
+  // For all non-visual-media attachments, we only show the first attachment
+  return [first];
+}
+
+const MESSAGE_ATTACHMENT_TYPES_NEEDING_THUMBNAILS =
+  new Set<MessageAttachmentType>(['attachment', 'sticker']);
 
 export function shouldGenerateThumbnailForAttachmentType(
   type: MessageAttachmentType

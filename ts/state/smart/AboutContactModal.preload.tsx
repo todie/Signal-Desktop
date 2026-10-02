@@ -1,6 +1,6 @@
 // Copyright 2024 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
-import React, { memo, useCallback } from 'react';
+import { memo, useCallback } from 'react';
 import { useSelector } from 'react-redux';
 
 import { AboutContactModal } from '../../components/conversation/AboutContactModal.dom.tsx';
@@ -17,7 +17,7 @@ import type { ConversationType } from '../ducks/conversations.preload.ts';
 import { useConversationsActions } from '../ducks/conversations.preload.ts';
 import { useGlobalModalActions } from '../ducks/globalModals.preload.ts';
 import { strictAssert } from '../../util/assert.std.ts';
-import { getAddedByForOurPendingInvitation } from '../../util/getAddedByForOurPendingInvitation.preload.ts';
+import { getAddedByForGroup } from '../../util/getAddedByForGroup.preload.ts';
 import { getItems } from '../selectors/items.dom.ts';
 import { isFeaturedEnabledSelector } from '../../util/isFeatureEnabled.dom.ts';
 import { getCanAddLabel } from '../../types/GroupMemberLabels.std.ts';
@@ -38,7 +38,7 @@ function isFromOrAddedByTrustedContact(
     return Boolean(conversation.name) || Boolean(conversation.profileSharing);
   }
 
-  const addedByConv = getAddedByForOurPendingInvitation(conversation);
+  const addedByConv = getAddedByForGroup(conversation);
   if (!addedByConv) {
     return false;
   }
@@ -100,6 +100,10 @@ export const SmartAboutContactModal = memo(function SmartAboutContactModal() {
     toggleNotePreviewModal({ conversationId: contactId });
   }, [toggleNotePreviewModal, contactId]);
 
+  const handleClose = useCallback(() => {
+    toggleAboutContactModal(null);
+  }, [toggleAboutContactModal]);
+
   if (contact == null) {
     return null;
   }
@@ -115,7 +119,7 @@ export const SmartAboutContactModal = memo(function SmartAboutContactModal() {
       fromOrAddedByTrustedContact={isFromOrAddedByTrustedContact(contact)}
       isEditMemberLabelEnabled={isEditMemberLabelEnabled}
       isSignalConnection={isSignalConnection(contact)}
-      onClose={toggleAboutContactModal}
+      onClose={handleClose}
       onOpenNotePreviewModal={handleOpenNotePreviewModal}
       pendingAvatarDownload={
         conversationId ? isPendingAvatarDownload(conversationId) : false
@@ -129,7 +133,7 @@ export const SmartAboutContactModal = memo(function SmartAboutContactModal() {
             state: ProfileEditorPage.ProfileName,
           },
         });
-        toggleAboutContactModal(undefined);
+        toggleAboutContactModal(null);
       }}
       showQRCodeScreen={() => {
         changeLocation({
@@ -139,7 +143,7 @@ export const SmartAboutContactModal = memo(function SmartAboutContactModal() {
             state: ProfileEditorPage.UsernameLink,
           },
         });
-        toggleAboutContactModal(undefined);
+        toggleAboutContactModal(null);
       }}
       showEditMemberLabelScreen={() => {
         changeLocation({
@@ -159,7 +163,7 @@ export const SmartAboutContactModal = memo(function SmartAboutContactModal() {
             },
           },
         });
-        toggleAboutContactModal(undefined);
+        toggleAboutContactModal(null);
       }}
       startAvatarDownload={
         conversationId ? () => startAvatarDownload(conversationId) : undefined

@@ -50,6 +50,7 @@ import {
   deleteMegaphoneAndRemoveFromRedux,
   runMegaphoneCheck,
 } from './megaphone.preload.ts';
+import { canConversationBeUnarchived } from '../util/canConversationBeUnarchived.preload.ts';
 
 const { last } = lodash;
 
@@ -63,7 +64,7 @@ const VERSION_WATERMARK_STORAGE_KEY = 'releaseNotesVersionWatermark';
 const BUCKET_VALUE_HASH_SALT = 'ReleaseNoteAndMegaphoneFetcher';
 
 type MinimalEventsType = {
-  on(event: 'timetravel', callback: () => void): void;
+  on: (event: 'timetravel', callback: () => void) => void;
 };
 
 type FetchOptions = {
@@ -110,7 +111,7 @@ export class ReleaseNoteAndMegaphoneFetcher {
   static initComplete = false;
   #timeout: NodeJS.Timeout | undefined;
   #isRunning = false;
-  #server: ServerType;
+  readonly #server: ServerType;
 
   constructor(server: ServerType) {
     this.#server = server;
@@ -145,11 +146,9 @@ export class ReleaseNoteAndMegaphoneFetcher {
 
   #getLocales(): ReadonlyArray<string> {
     const globalLocale = new Intl.Locale(window.SignalContext.getI18nLocale());
-    return [
-      globalLocale.toString(),
-      globalLocale.language.toString(),
-      'en',
-    ].map(locale => locale.toLocaleLowerCase().replace('-', '_'));
+    return [globalLocale.toString(), globalLocale.language, 'en'].map(locale =>
+      locale.toLocaleLowerCase().replace('-', '_')
+    );
   }
 
   async #maybeGetLocaleMegaphone(
@@ -246,7 +245,7 @@ export class ReleaseNoteAndMegaphoneFetcher {
     megaphones: ReadonlyArray<ManifestMegaphoneType>
   ): Promise<number> {
     const nowSeconds = Math.round(Date.now() / 1000);
-    const ourE164 = itemStorage.user.getNumber();
+    const ourE164 = itemStorage.user.getOptionalNumber();
     const ourAci = itemStorage.user.getAci();
     const locales = this.#getLocales();
     let savedCount = 0;
@@ -530,11 +529,16 @@ export class ReleaseNoteAndMegaphoneFetcher {
       messages.map(message => saveNewMessageBatcher.add(message))
     );
 
-    signalConversation.set({ active_at: Date.now(), isArchived: false });
-    signalConversation.throttledUpdateUnread();
-
     log.info(`Updating version watermark to ${versionWatermark}`);
-    drop(itemStorage.put(VERSION_WATERMARK_STORAGE_KEY, versionWatermark));
+    await itemStorage.put(VERSION_WATERMARK_STORAGE_KEY, versionWatermark);
+
+    signalConversation.set({ active_at: Date.now() });
+
+    if (canConversationBeUnarchived(signalConversation.attributes)) {
+      signalConversation.setArchived(false);
+    }
+    signalConversation.throttledUpdateUnread();
+    await signalConversation.updateLastMessage();
   }
 
   async #scheduleForNextRun(options?: {
@@ -605,7 +609,8 @@ export class ReleaseNoteAndMegaphoneFetcher {
 
       await this.#scheduleForNextRun();
       this.setTimeoutForNextRun();
-      window.SignalCI?.handleEvent('release_notes_fetcher_complete', {});
+
+      window.SignalCI?.handleEvent('release_notes_fetcher_complete', null);
     } catch (error) {
       const errorString =
         error instanceof HTTPError

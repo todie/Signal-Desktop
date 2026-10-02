@@ -57,7 +57,6 @@ export function callLinkRestrictionsToRingRTC(
 
 export function getRoomIdFromRootKey(rootKey: CallLinkRootKey): string {
   const roomId = rootKey.deriveRoomId();
-  // @ts-expect-error needs ringrtc update
   const roomIdBytes: Uint8Array<ArrayBuffer> = roomId;
   return Bytes.toHex(roomIdBytes);
 }
@@ -65,15 +64,6 @@ export function getRoomIdFromRootKey(rootKey: CallLinkRootKey): string {
 export function getRoomIdFromRootKeyString(rootKeyString: string): string {
   const callLinkRootKey = CallLinkRootKey.parse(rootKeyString);
   return getRoomIdFromRootKey(callLinkRootKey);
-}
-
-export function getCallLinkRootKeyFromUrlKey(
-  key: string
-): Uint8Array<ArrayBuffer> {
-  const rootKeyBytes = CallLinkRootKey.parse(key).bytes;
-  // @ts-expect-error needs ringrtc update
-  const result: Uint8Array<ArrayBuffer> = rootKeyBytes;
-  return result;
 }
 
 export function getRoomIdFromCallLink(url: string): string {
@@ -84,13 +74,12 @@ export function getRoomIdFromCallLink(url: string): string {
 
 export function toRootKeyBytes(rootKey: string): Uint8Array<ArrayBuffer> {
   const rootKeyBytes = CallLinkRootKey.parse(rootKey).bytes;
-  // @ts-expect-error needs ringrtc update
   const result: Uint8Array<ArrayBuffer> = rootKeyBytes;
   return result;
 }
 
 export function fromRootKeyBytes(rootKey: Uint8Array<ArrayBuffer>): string {
-  return CallLinkRootKey.fromBytes(rootKey as Buffer<ArrayBuffer>).toString();
+  return CallLinkRootKey.fromBytes(rootKey).toUnredactedString();
 }
 
 /**
@@ -157,6 +146,7 @@ export function defunctCallLinkFromRecord(
     roomId: record.roomId,
     rootKey,
     adminKey,
+    addedAt: record.addedAt,
     storageID: record.storageID || undefined,
     storageVersion: record.storageVersion || undefined,
     storageUnknownFields: record.storageUnknownFields || undefined,
@@ -179,6 +169,7 @@ export function defunctCallLinkToRecord(
     roomId: defunctCallLink.roomId,
     rootKey,
     adminKey,
+    addedAt: defunctCallLink.addedAt,
     storageID: defunctCallLink.storageID || null,
     storageVersion: defunctCallLink.storageVersion || null,
     storageUnknownFields: defunctCallLink.storageUnknownFields || null,

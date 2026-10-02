@@ -1,11 +1,10 @@
 // Copyright 2025 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
-import type { CSSProperties, ForwardedRef } from 'react';
-import React, { forwardRef, useEffect, useRef, useState } from 'react';
+import type { CSSProperties, ForwardedRef, JSX } from 'react';
+import { forwardRef, useEffect, useRef, useState } from 'react';
 import { useReducedMotion } from '@react-spring/web';
 import { SpinnerV2 } from '../SpinnerV2.dom.tsx';
 import { strictAssert } from '../../util/assert.std.ts';
-import type { Loadable } from '../../util/loadable.std.ts';
 import { LoadingState } from '../../util/loadable.std.ts';
 import { useIntent } from './base/FunImage.dom.tsx';
 import { createLogger } from '../../logging/log.std.ts';
@@ -23,7 +22,7 @@ export type FunGifProps = Readonly<{
   ignoreReducedMotion?: boolean;
 }>;
 
-export function FunGif(props: FunGifProps): React.JSX.Element {
+export function FunGif(props: FunGifProps): JSX.Element {
   if (props.ignoreReducedMotion) {
     return <FunGifBase {...props} autoPlay />;
   }
@@ -80,8 +79,6 @@ function FunGifReducedMotion(props: FunGifProps) {
   return <FunGifBase {...props} ref={videoRef} autoPlay={shouldPlay} />;
 }
 
-export type FunGifPreviewLoadable = Loadable<string>;
-
 export type FunGifPreviewProps = Readonly<{
   src: string | null;
   state: LoadingState;
@@ -97,7 +94,7 @@ export type FunGifPreviewProps = Readonly<{
   'aria-describedby': string;
 }>;
 
-export function FunGifPreview(props: FunGifPreviewProps): React.JSX.Element {
+export function FunGifPreview(props: FunGifPreviewProps): JSX.Element {
   const ref = useRef<HTMLVideoElement>(null);
   const [spinner, setSpinner] = useState(false);
   const [playbackError, setPlaybackError] = useState(false);

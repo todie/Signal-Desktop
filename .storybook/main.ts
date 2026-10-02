@@ -43,15 +43,17 @@ const storybookConfig: StorybookConfig = {
     { from: '../fonts', to: 'fonts' },
     { from: '../images', to: 'images' },
     { from: '../fixtures', to: 'fixtures' },
-    {
-      from: '../node_modules/emoji-datasource-apple/img',
-      to: 'node_modules/emoji-datasource-apple/img',
-    },
-    {
-      from: '../node_modules/intl-tel-input/build/img',
-      to: 'node_modules/intl-tel-input/build/img',
-    },
   ],
+
+  swc() {
+    return {
+      jsc: {
+        transform: {
+          react: { runtime: 'automatic' },
+        },
+      },
+    };
+  },
 
   webpackFinal(webpackConfig) {
     // oxlint-disable-next-line no-param-reassign
@@ -68,9 +70,17 @@ const storybookConfig: StorybookConfig = {
     webpackConfig.module!.rules!.unshift({
       test: /\.scss$/,
       use: [
-        { loader: 'style-loader' },
-        { loader: 'css-loader', options: { modules: false, url: false } },
-        { loader: 'sass-loader' },
+        { loader: require.resolve('style-loader') },
+        {
+          loader: require.resolve('css-loader'),
+          options: { modules: false, url: false },
+        },
+        {
+          loader: require.resolve('sass-loader'),
+          options: {
+            additionalData: '$is-storybook: true;',
+          },
+        },
       ],
     });
 
@@ -87,13 +97,11 @@ const storybookConfig: StorybookConfig = {
       test: /tailwind-config\.css$/,
       use: [
         {
-          loader: 'postcss-loader',
+          loader: require.resolve('postcss-loader'),
           options: {
             postcssOptions: {
               config: false,
-              plugins: {
-                '@tailwindcss/postcss': {},
-              },
+              plugins: [require.resolve('@tailwindcss/postcss')],
             },
           },
         },
@@ -106,7 +114,7 @@ const storybookConfig: StorybookConfig = {
     // oxlint-disable-next-line no-param-reassign
     webpackConfig.externals = ({ request }, callback) => {
       if (
-        (/^node:/.test(request) && request !== 'node:buffer') ||
+        (request.startsWith('node:') && request !== 'node:buffer') ||
         EXTERNALS.has(request)
       ) {
         // Keep Node.js imports unchanged

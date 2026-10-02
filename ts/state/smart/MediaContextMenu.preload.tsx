@@ -1,6 +1,6 @@
 // Copyright 2026 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
-import React, { useCallback, type ReactNode } from 'react';
+import { useCallback, type ReactNode, type JSX } from 'react';
 import { useSelector } from 'react-redux';
 import { MediaContextMenu } from '../../components/conversation/media-gallery/MediaContextMenu.dom.tsx';
 import { ForwardMessagesModalType } from '../../components/ForwardMessagesModal.dom.tsx';
@@ -82,16 +82,18 @@ async function doRemoveAttachment(
     log.info(`Deleting whole message ${mediaItem.message.id}`);
     await applyDeleteMessage(message.attributes);
 
-    await singleProtoJobQueue.add(
-      MessageSender.getDeleteForMeSyncMessage([
-        {
-          type: 'delete-message',
-          conversation: conversationIdentifier,
-          message: addressableMessage,
-          timestamp: Date.now(),
-        },
-      ])
-    );
+    if (window.ConversationController.doWeHaveOtherDevices()) {
+      await singleProtoJobQueue.add(
+        MessageSender.getDeleteForMeSyncMessage([
+          {
+            type: 'delete-message',
+            conversation: conversationIdentifier,
+            message: addressableMessage,
+            timestamp: Date.now(),
+          },
+        ])
+      );
+    }
   } else {
     log.info(`Deleting a single attachment for ${mediaItem.message.id}`);
     const attachmentData = {
@@ -114,17 +116,19 @@ async function doRemoveAttachment(
       return;
     }
 
-    await singleProtoJobQueue.add(
-      MessageSender.getDeleteForMeSyncMessage([
-        {
-          type: 'delete-single-attachment',
-          conversation: conversationIdentifier,
-          message: addressableMessage,
-          ...attachmentData,
-          timestamp: Date.now(),
-        },
-      ])
-    );
+    if (window.ConversationController.doWeHaveOtherDevices()) {
+      await singleProtoJobQueue.add(
+        MessageSender.getDeleteForMeSyncMessage([
+          {
+            type: 'delete-single-attachment',
+            conversation: conversationIdentifier,
+            message: addressableMessage,
+            ...attachmentData,
+            timestamp: Date.now(),
+          },
+        ])
+      );
+    }
   }
 }
 
@@ -263,7 +267,7 @@ function ContactContextMenu({
 export function SmartMediaContextMenu({
   mediaItem,
   children,
-}: PropsType): React.JSX.Element {
+}: PropsType): JSX.Element {
   const i18n = useSelector(getIntl);
 
   const { showConversation } = useConversationsActions();

@@ -1,6 +1,8 @@
 // Copyright 2020 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import type { RefObject } from 'react';
+
 import type { ThunkAction, ThunkDispatch } from 'redux-thunk';
 import { ipcRenderer } from 'electron';
 import lodash from 'lodash';
@@ -116,11 +118,11 @@ import { addCallHistory, reloadCallHistory } from './callHistory.preload.ts';
 import { saveDraftRecordingIfNeeded } from './composer.preload.ts';
 import type { StartCallData } from '../../components/ConfirmLeaveCallModal.dom.tsx';
 import {
+  getActiveCallState,
   getCallLinksByRoomId,
   getPresentingSource,
 } from '../selectors/calling.std.ts';
-import { storageServiceUploadJob } from '../../services/storage.preload.ts';
-import { CallLinkFinalizeDeleteManager } from '../../jobs/CallLinkFinalizeDeleteManager.preload.ts';
+import { runStorageServiceUploadJob } from '../../services/storage.preload.ts';
 import { callLinkRefreshJobQueue } from '../../jobs/callLinkRefreshJobQueue.preload.ts';
 import {
   isOnline,
@@ -128,8 +130,11 @@ import {
 } from '../../textsecure/WebAPI.preload.ts';
 import { itemStorage } from '../../textsecure/Storage.preload.ts';
 import type { SizeCallbackType } from '../../calling/VideoSupport.preload.ts';
-import type { NoopActionType } from './noop.std.ts';
+import { noopAction, type NoopActionType } from './noop.std.ts';
 import type { SignalService } from '../../protobuf/index.std.ts';
+import { Emoji } from '../../axo/emoji.std.ts';
+import type { ErrorModalDataProps } from '../../components/ErrorModal.dom.tsx';
+import { callLinkCleanupService } from '../../services/expiring/callLinkCleanupService.preload.ts';
 
 const { omit } = lodash;
 
@@ -353,12 +358,12 @@ export type SendGroupCallRaiseHandType = ReadonlyDeep<{
 export type SendGroupCallReactionType = ReadonlyDeep<{
   callMode: CallMode;
   conversationId: string;
-  value: string;
+  value: Emoji.Variant;
 }>;
 type SendGroupCallReactionLocalCopyType = ReadonlyDeep<{
   callMode: CallMode;
   conversationId: string;
-  value: string;
+  value: Emoji.Variant;
   timestamp: number;
 }>;
 
@@ -491,7 +496,7 @@ type StartCallLinkLobbyPayloadType = {
 
 // oxlint-disable-next-line signal-desktop/enforce-type-alias-readonlydeep
 export type SetRendererCanvasType = {
-  element: React.RefObject<HTMLCanvasElement | null> | undefined;
+  element: RefObject<HTMLCanvasElement | null> | undefined;
   sizeCallback: SizeCallbackType | undefined;
 };
 
@@ -846,7 +851,10 @@ export type GroupCallStateChangeActionType = {
 type GroupCallReactionsReceivedActionPayloadType = ReadonlyDeep<{
   callMode: CallMode;
   conversationId: string;
-  reactions: Array<CallReaction>;
+  reactions: Array<{
+    demuxId: number;
+    value: Emoji.Variant;
+  }>;
   timestamp: number;
 }>;
 
@@ -1298,10 +1306,7 @@ function sendRemoteMute(
     }
 
     calling.sendRemoteMute(activeCall.conversationId, demuxId);
-    dispatch({
-      type: 'NOOP',
-      payload: null,
-    });
+    dispatch(noopAction('sendRemoteMute'));
   };
 }
 
@@ -1585,9 +1590,16 @@ function receiveGroupCallReactions(
     const { callMode, conversationId } = payload;
     const timestamp = Date.now();
 
+    const reactions = payload.reactions.map(reaction => {
+      return {
+        demuxId: reaction.demuxId,
+        value: Emoji.unsafeCastMaybeInvalidStringToVariant(reaction.value),
+      };
+    });
+
     dispatch({
       type: GROUP_CALL_REACTIONS_RECEIVED,
-      payload: { ...payload, callMode, timestamp },
+      payload: { conversationId, callMode, timestamp, reactions },
     });
     await sleep(CALLING_REACTIONS_LIFETIME);
 
@@ -2028,28 +2040,6 @@ function setLocalAudio(
   };
 }
 
-function setLocalAudioRemoteMuted(
-  payload: Parameters<SetMutedByType>[0]
-): ThunkAction<void, RootStateType, unknown, SetLocalAudioActionType> {
-  return (dispatch, getState) => {
-    const activeCall = getActiveCall(getState().calling);
-    if (!activeCall) {
-      log.warn('Trying to set local audio when no call is active');
-      return;
-    }
-
-    calling.setOutgoingAudioRemoteMuted(
-      activeCall.conversationId,
-      payload?.mutedBy
-    );
-
-    dispatch({
-      type: SET_LOCAL_AUDIO_FULFILLED,
-      payload: { enabled: false },
-    });
-  };
-}
-
 function setLocalVideo(
   payload: Parameters<SetLocalVideoType>[0]
 ): ThunkAction<void, RootStateType, unknown, SetLocalVideoFulfilledActionType> {
@@ -2060,7 +2050,7 @@ function setLocalVideo(
       return;
     }
 
-    let enabled = payload?.enabled;
+    let enabled = payload.enabled;
     if (await requestCameraPermissions()) {
       if (
         isGroupOrAdhocCallState(activeCall) ||
@@ -2068,9 +2058,9 @@ function setLocalVideo(
       ) {
         await calling.setOutgoingVideo(
           activeCall.conversationId,
-          Boolean(payload?.enabled)
+          payload.enabled
         );
-      } else if (payload?.enabled) {
+      } else if (payload.enabled) {
         await calling.enableLocalCamera(activeCall.callMode);
       } else {
         calling.disableLocalVideo();
@@ -2082,7 +2072,7 @@ function setLocalVideo(
     dispatch({
       type: SET_LOCAL_VIDEO_FULFILLED,
       payload: {
-        enabled: Boolean(enabled),
+        enabled,
       },
     });
   };
@@ -2092,11 +2082,25 @@ function setMutedBy(
   payload: Parameters<SetMutedByType>[0]
 ): ThunkAction<void, RootStateType, unknown, SetMutedByActionType> {
   return (dispatch, getState) => {
-    const activeCall = getActiveCall(getState().calling);
+    const state = getState();
+    const activeCall = getActiveCall(state.calling);
     if (!activeCall) {
       log.warn('Trying to set muted by when no call is active');
       return;
     }
+
+    const activeCallState = getActiveCallState(state);
+    if (!activeCallState || !activeCallState.hasLocalAudio) {
+      log.info(
+        'Trying to set muted by when no active call state or already muted'
+      );
+      return;
+    }
+
+    calling.setOutgoingAudioRemoteMuted(
+      activeCall.conversationId,
+      payload.mutedBy
+    );
 
     dispatch({
       type: SET_MUTED_BY,
@@ -2330,7 +2334,7 @@ function createCallLink(
       DataWriter.saveCallHistory(callHistory),
     ]);
 
-    storageServiceUploadJob({ reason: 'createCallLink' });
+    runStorageServiceUploadJob({ reason: 'createCallLink' });
 
     dispatch({
       type: HANDLE_CALL_LINK_UPDATE,
@@ -2356,37 +2360,31 @@ function deleteCallLink(
       return;
     }
 
-    const isStorageSyncNeeded = await DataWriter.beginDeleteCallLink(roomId);
+    const isStorageSyncNeeded = await DataWriter.markCallLinkDeleted(
+      roomId,
+      Date.now()
+    );
     if (isStorageSyncNeeded) {
-      storageServiceUploadJob({ reason: 'deleteCallLink' });
+      runStorageServiceUploadJob({ reason: 'deleteCallLink' });
     }
     try {
       if (isCallLinkAdmin(callLink)) {
         // This throws if call link is active or network is unavailable.
         await calling.deleteCallLink(callLink);
-        // Wait for storage service sync before finalizing delete.
-        drop(
-          CallLinkFinalizeDeleteManager.addJob(
-            { roomId: callLink.roomId },
-            { delay: 10000 }
-          )
-        );
+        drop(callLinkCleanupService.trigger('deleted call link'));
       }
 
       await DataWriter.deleteCallHistoryByRoomId(callLink.roomId);
       dispatch(handleCallLinkDelete({ roomId }));
     } catch (error) {
       log.warn('clearCallHistory: Failed to delete call link', error);
-
       const i18n = getIntl(getState());
-      dispatch({
-        type: SHOW_ERROR_MODAL,
-        payload: {
-          title: null,
-          description: i18n('icu:calling__call-link-delete-failed'),
-          buttonVariant: ButtonVariant.Primary,
-        },
-      });
+      const payload: ErrorModalDataProps = {
+        // @ts-expect-error ConfirmationDialog migration: Needs title
+        title: null,
+        description: i18n('icu:calling__call-link-delete-failed'),
+      };
+      dispatch({ type: SHOW_ERROR_MODAL, payload });
     }
   };
 }
@@ -2972,7 +2970,6 @@ function submitCallQualitySurvey(
       const { qualityStats } = callSummary;
       const { audioStats, videoStats } = qualityStats;
 
-      // @ts-expect-error needs ringrtc update
       const callTelemetry: Uint8Array<ArrayBuffer> | null =
         callSummary.rawStats ?? null;
 
@@ -3114,7 +3111,6 @@ export const actions = {
   setIsCallActive,
   setLocalAudio,
   setLocalVideo,
-  setLocalAudioRemoteMuted,
   setMutedBy,
   setOutgoingRing,
   setRendererCanvas,
@@ -4354,7 +4350,7 @@ export function reducer(
       ...state,
       activeCallState: {
         ...state.activeCallState,
-        hasLocalVideo: Boolean(action.payload?.enabled),
+        hasLocalVideo: action.payload.enabled,
       },
     };
   }
@@ -4368,13 +4364,11 @@ export function reducer(
       return state;
     }
 
-    const newMutedBy = activeCallState.hasLocalAudio ? mutedBy : undefined;
-
     return {
       ...state,
       activeCallState: {
         ...activeCallState,
-        mutedBy: newMutedBy,
+        mutedBy,
       },
     };
   }

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { ReactElement } from 'react';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import classNames from 'classnames';
 import { animated, useSpring } from '@react-spring/web';
 
@@ -189,6 +189,7 @@ function TypingBubbleGroupAvatars({
   }, [typingContactIds]);
 
   useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect
     setAllContactsById(prevMap => {
       const map = new Map([...prevMap]);
       for (const id of typingContactIds) {
@@ -277,7 +278,7 @@ export function TypingBubble({
     [typingContactIdTimestamps]
   );
   const [shouldAnimate, setShouldAnimate] = useState(false);
-  const prevTypingContactIds = React.useRef<ReadonlyArray<string> | undefined>(
+  const prevTypingContactIds = useRef<ReadonlyArray<string> | undefined>(
     undefined
   );
   const isSomeoneTyping = useMemo(

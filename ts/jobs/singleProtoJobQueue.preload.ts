@@ -34,8 +34,8 @@ const MAX_RETRY_TIME = DAY;
 const MAX_PARALLEL_JOBS = 5;
 const MAX_ATTEMPTS = exponentialBackoffMaxAttempts(MAX_RETRY_TIME);
 
-export class SingleProtoJobQueue extends JobQueue<SingleProtoJobData> {
-  #parallelQueue = new PQueue({ concurrency: MAX_PARALLEL_JOBS });
+class SingleProtoJobQueue extends JobQueue<SingleProtoJobData> {
+  readonly #parallelQueue = new PQueue({ concurrency: MAX_PARALLEL_JOBS });
 
   protected override getQueues(): ReadonlySet<PQueue> {
     return new Set([this.#parallelQueue]);
@@ -95,34 +95,36 @@ export class SingleProtoJobQueue extends JobQueue<SingleProtoJobData> {
       return undefined;
     }
 
-    const proto = Proto.Content.decode(Bytes.fromBase64(protoBase64));
-    const options = await getSendOptions(conversation.attributes, {
-      syncMessage: isSyncMessage,
-    });
-
-    try {
-      await handleMessageSend(
-        messageSender.sendIndividualProto({
-          contentHint,
-          serviceId,
-          options,
-          proto,
-          timestamp,
-          urgent: isBoolean(urgent) ? urgent : true,
-        }),
-        { messageIds, sendType: type }
-      );
-    } catch (error: unknown) {
-      await handleMultipleSendErrors({
-        errors: maybeExpandErrors(error),
-        isFinalAttempt,
-        log,
-        timeRemaining,
-        toThrow: error,
+    return conversation.queueJob('singleProtoJobQueue.run', async () => {
+      const proto = Proto.Content.decode(Bytes.fromBase64(protoBase64));
+      const options = await getSendOptions(conversation.attributes, {
+        syncMessage: isSyncMessage,
       });
-    }
 
-    return undefined;
+      try {
+        await handleMessageSend(
+          messageSender.sendIndividualProto({
+            contentHint,
+            serviceId,
+            options,
+            proto,
+            timestamp,
+            urgent: isBoolean(urgent) ? urgent : true,
+          }),
+          { messageIds, sendType: type }
+        );
+      } catch (error: unknown) {
+        await handleMultipleSendErrors({
+          errors: maybeExpandErrors(error),
+          isFinalAttempt,
+          log,
+          timeRemaining,
+          toThrow: error,
+        });
+      }
+
+      return undefined;
+    });
   }
 }
 

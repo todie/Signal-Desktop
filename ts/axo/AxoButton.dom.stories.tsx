@@ -1,33 +1,54 @@
 // Copyright 2025 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
-import type { ReactNode } from 'react';
-import React, { useState } from 'react';
+import type { ReactNode, JSX } from 'react';
+import { useState } from 'react';
 import type { Meta } from '@storybook/react';
 import { action } from '@storybook/addon-actions';
-import {
-  _getAllAxoButtonVariants,
-  _getAllAxoButtonSizes,
-  AxoButton,
-} from './AxoButton.dom.tsx';
+import { AxoButton } from './AxoButton.dom.tsx';
 import { tw } from './tw.dom.tsx';
 import { AxoSwitch } from './AxoSwitch.dom.tsx';
+import { variants } from './_internal/variants.dom.tsx';
+import { Story } from './_storybook-helpers/Story.dom.tsx';
 
 export default {
   title: 'Axo/AxoButton',
 } satisfies Meta;
 
-export function Basic(): React.JSX.Element {
-  const variants = _getAllAxoButtonVariants();
-  const sizes = _getAllAxoButtonSizes();
+const Backgrounds = variants<AxoButton.Variant>('AxoButton.Variant', {
+  'strong-secondary': tw('bg-transparent'),
+  'strong-primary': tw('bg-transparent'),
+  'strong-affirmative': tw('bg-transparent'),
+  'strong-warning': tw('bg-transparent'),
+  'strong-destructive': tw('bg-transparent'),
+  'subtle-secondary': tw('bg-transparent'),
+  'subtle-primary': tw('bg-transparent'),
+  'subtle-affirmative': tw('bg-transparent'),
+  'subtle-warning': tw('bg-transparent'),
+  'subtle-destructive': tw('bg-transparent'),
+  'elevated-secondary': tw('bg-transparent'),
+  'implied-secondary': tw('bg-transparent'),
+  'implied-primary': tw('bg-transparent'),
+  'implied-affirmative': tw('bg-transparent'),
+  'implied-destructive': tw('bg-transparent'),
+  'message-incoming-primary': tw('bg-surface-message-incoming'),
+  'message-outgoing-primary': tw('bg-surface-message-outgoing'),
+});
+
+export function Basic(): JSX.Element {
+  const allVariants = AxoButton._getAllVariants();
+  const allSizes = AxoButton._getAllSizes();
   return (
-    <div className={tw('grid gap-1')}>
-      {sizes.map(size => {
+    <div className={tw('grid gap-1 p-4')}>
+      {allSizes.map(size => {
         return (
           <div>
-            <h2 className={tw('type-title-medium')}>Size: {size}</h2>
-            {variants.map(variant => {
+            <h2 className={tw('p-1 type-title-medium')}>Size: {size}</h2>
+            {allVariants.map(variant => {
               return (
-                <div key={variant} className={tw('flex gap-1')}>
+                <div
+                  key={variant}
+                  className={tw('flex gap-1 p-1', Backgrounds.get(variant))}
+                >
                   <AxoButton.Root
                     variant={variant}
                     size={size}
@@ -65,7 +86,7 @@ export function Basic(): React.JSX.Element {
                   </AxoButton.Root>
 
                   <AxoButton.Root
-                    arrow
+                    arrow="next"
                     variant={variant}
                     size={size}
                     onClick={action('click')}
@@ -74,7 +95,7 @@ export function Basic(): React.JSX.Element {
                   </AxoButton.Root>
 
                   <AxoButton.Root
-                    arrow
+                    arrow="next"
                     variant={variant}
                     size={size}
                     onClick={action('click')}
@@ -92,35 +113,33 @@ export function Basic(): React.JSX.Element {
   );
 }
 
-export function Spinner(): React.JSX.Element {
-  const sizes = _getAllAxoButtonSizes();
-  const variants = _getAllAxoButtonVariants();
+export function Spinner(): JSX.Element {
+  const allVariants = AxoButton._getAllVariants();
+  const allSizes = AxoButton._getAllSizes();
 
-  const [loading, setLoading] = useState(true);
+  const [pending, setPending] = useState(true);
 
   function handleClick() {
-    setLoading(true);
+    setPending(true);
   }
 
   return (
     <>
       <div className={tw('mb-4 flex gap-2')}>
-        <AxoSwitch.Root checked={loading} onCheckedChange={setLoading} />
+        <AxoSwitch.Root checked={pending} onCheckedChange={setPending} />
         <span>Loading</span>
       </div>
       <div className={tw('flex flex-col gap-2')}>
-        {sizes.map(size => {
+        {allSizes.map(size => {
           return (
             <div key={size} className={tw('flex gap-2')}>
-              {variants.map(variant => {
+              {allVariants.map(variant => {
                 return (
                   <AxoButton.Root
                     variant={variant}
                     size={size}
-                    disabled={loading}
-                    experimentalSpinner={
-                      loading ? { 'aria-label': 'Loading' } : null
-                    }
+                    disabled={pending}
+                    pending={pending}
                     onClick={handleClick}
                   >
                     Save
@@ -145,7 +164,7 @@ const LONG_TEXT = (
 
 function Fit(props: { longText?: boolean }) {
   return (
-    <AxoButton.Root variant="primary" size="md" width="fit">
+    <AxoButton.Root variant="strong-primary" size="md" width="fit">
       Fit {props.longText && LONG_TEXT}
     </AxoButton.Root>
   );
@@ -153,7 +172,7 @@ function Fit(props: { longText?: boolean }) {
 
 function Grow(props: { longText?: boolean }) {
   return (
-    <AxoButton.Root variant="affirmative" size="md" width="grow">
+    <AxoButton.Root variant="strong-affirmative" size="md" width="grow">
       Grow {props.longText && LONG_TEXT}
     </AxoButton.Root>
   );
@@ -161,7 +180,7 @@ function Grow(props: { longText?: boolean }) {
 
 function Full(props: { longText?: boolean }) {
   return (
-    <AxoButton.Root variant="destructive" size="md" width="full">
+    <AxoButton.Root variant="strong-destructive" size="md" width="full">
       Fill {props.longText && LONG_TEXT}
     </AxoButton.Root>
   );
@@ -265,7 +284,7 @@ function WidthTestTemplate(props: {
   );
 }
 
-export function WidthsTest(): React.JSX.Element {
+export function WidthsTest(): JSX.Element {
   return (
     <div className={tw('space-y-16 pb-4')}>
       <WidthTestTemplate title="Block">
@@ -298,5 +317,54 @@ export function WidthsTest(): React.JSX.Element {
         {items => <div className={tw('grid grid-cols-3')}>{items}</div>}
       </WidthTestTemplate>
     </div>
+  );
+}
+
+export function Arrows(): ReactNode {
+  return (
+    <div className={tw('flex gap-2')}>
+      <AxoButton.Root variant="subtle-primary" size="md" arrow="collapse">
+        Collapse
+      </AxoButton.Root>
+      <AxoButton.Root variant="subtle-primary" size="md" arrow="expand">
+        Expand
+      </AxoButton.Root>
+      <AxoButton.Root variant="subtle-primary" size="md" arrow="next">
+        Next
+      </AxoButton.Root>
+      <AxoButton.Root variant="subtle-primary" size="md" arrow="external-link">
+        External Link
+      </AxoButton.Root>
+    </div>
+  );
+}
+
+export function Group(): ReactNode {
+  return (
+    <Story.Stack>
+      <AxoButton.Group>
+        <AxoButton.Root variant="subtle-secondary" size="md">
+          One
+        </AxoButton.Root>
+        <AxoButton.Root variant="subtle-secondary" size="md">
+          Two
+        </AxoButton.Root>
+        <AxoButton.Root variant="subtle-primary" size="md">
+          Three
+        </AxoButton.Root>
+      </AxoButton.Group>
+
+      <AxoButton.Group>
+        <AxoButton.Root width="grow" variant="subtle-secondary" size="md">
+          One
+        </AxoButton.Root>
+        <AxoButton.Root width="grow" variant="subtle-secondary" size="md">
+          Two
+        </AxoButton.Root>
+        <AxoButton.Root width="grow" variant="subtle-primary" size="md">
+          Three
+        </AxoButton.Root>
+      </AxoButton.Group>
+    </Story.Stack>
   );
 }

@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { Range } from '@tanstack/react-virtual';
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
-import type { PointerEvent } from 'react';
-import React, {
+import type { PointerEvent, JSX } from 'react';
+import {
   memo,
   useCallback,
   useEffect,
@@ -64,16 +64,12 @@ import type { LocalizerType } from '../../../types/I18N.std.ts';
 import { isAbortError } from '../../../util/isAbortError.std.ts';
 import { createLogger } from '../../../logging/log.std.ts';
 import * as Errors from '../../../types/errors.std.ts';
+import { Emoji } from '../../../axo/emoji.std.ts';
+import type { fetchGiphyFile } from '../../../state/smart/fun/giphy.preload.ts';
 import {
-  EMOJI_VARIANT_KEY_CONSTANTS,
-  getEmojiVariantByKey,
-} from '../data/emojis.std.ts';
-import type { fetchGiphyFile } from '../data/giphy.preload.ts';
-import {
-  getGifCdnUrlOrigin,
-  isGifCdnUrlOriginAllowed,
-  isTenorCdnUrlOrigin,
-} from '../../../util/gifCdnUrls.dom.ts';
+  GIPHY_SEARCH_QUERY_MAX_CODE_POINTS,
+  isGiphyCdnUrl,
+} from '../../../util/giphy.std.ts';
 import { tw } from '../../../axo/tw.dom.tsx';
 import { isScrollAtTop } from '../../../hooks/useSizeObserver.dom.tsx';
 
@@ -87,9 +83,7 @@ const FunGifBlobCache = new LRUCache<string, Blob>({
 const FunGifBlobLiveCache = new WeakMap<GifMediaType, Blob>();
 
 function readGifMediaFromCache(gifMedia: GifMediaType): Blob | null {
-  const cdnUrlOrigin = getGifCdnUrlOrigin(gifMedia.url);
-
-  if (cdnUrlOrigin == null || !isGifCdnUrlOriginAllowed(cdnUrlOrigin)) {
+  if (!isGiphyCdnUrl(gifMedia.url)) {
     FunGifBlobLiveCache.delete(gifMedia);
     FunGifBlobCache.delete(gifMedia.url);
     return null;
@@ -164,7 +158,7 @@ export type FunPanelGifsProps = Readonly<{
 export function FunPanelGifs({
   onSelectGif,
   onClose,
-}: FunPanelGifsProps): React.JSX.Element {
+}: FunPanelGifsProps): JSX.Element {
   const fun = useFunContext();
   const {
     i18n,
@@ -357,6 +351,7 @@ export function FunPanelGifs({
     [items]
   );
 
+  // oxlint-disable-next-line react/incompatible-library
   const virtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
     count,
     getScrollElement,
@@ -458,7 +453,9 @@ export function FunPanelGifs({
           searchInput={searchInput}
           onSearchInputChange={handleSearchInputChange}
           placeholder={i18n('icu:FunPanelGifs__SearchPlaceholder')}
-          aria-label={i18n('icu:FunPanelGifs__SearchLabel')}
+          label={i18n('icu:FunPanelGifs__SearchLabel')}
+          maxBytes={GIPHY_SEARCH_QUERY_MAX_CODE_POINTS}
+          maxGraphemes={GIPHY_SEARCH_QUERY_MAX_CODE_POINTS}
         />
       </FunPanelHeader>
       {visibleSelectedSection !== FunSectionCommon.SearchResults && (
@@ -561,9 +558,7 @@ export function FunPanelGifs({
                   <FunStaticEmoji
                     size={16}
                     role="presentation"
-                    emoji={getEmojiVariantByKey(
-                      EMOJI_VARIANT_KEY_CONSTANTS.SLIGHTLY_FROWNING_FACE
-                    )}
+                    emoji={Emoji.SLIGHTLY_FROWNING_FACE}
                   />
                 </FunResultsHeader>
               )}
@@ -671,9 +666,8 @@ const Item = memo(function Item(props: {
 
     async function download() {
       const cdnUrl = props.gif.previewMedia.url;
-      const cdnUrlOrigin = getGifCdnUrlOrigin(props.gif.previewMedia.url);
 
-      if (cdnUrlOrigin == null || !isGifCdnUrlOriginAllowed(cdnUrlOrigin)) {
+      if (!isGiphyCdnUrl(cdnUrl)) {
         onRemoveRecentGif(props.gif.id);
         return;
       }
@@ -686,11 +680,6 @@ const Item = memo(function Item(props: {
       } catch (error) {
         if (isAbortError(error)) {
           return; // ignore
-        }
-
-        if (isTenorCdnUrlOrigin(cdnUrlOrigin)) {
-          onRemoveRecentGif(props.gif.id);
-          return;
         }
 
         log.error('Failed to download gif', Errors.toLogFormat(error));

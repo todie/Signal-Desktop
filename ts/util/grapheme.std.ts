@@ -5,12 +5,9 @@ import memoizee from 'memoizee';
 
 import { map, size, take, join } from './iterables.std.ts';
 
-const getSegmenter = memoizee((): Intl.Segmenter => new Intl.Segmenter());
-
-export function getGraphemes(str: string): Iterable<string> {
-  const segments = getSegmenter().segment(str);
-  return map(segments, s => s.segment);
-}
+export const getSegmenter = memoizee(
+  (): Intl.Segmenter => new Intl.Segmenter()
+);
 
 export function count(str: string): number {
   const segments = getSegmenter().segment(str);
@@ -34,15 +31,6 @@ export function truncateAndSize(
     ),
     toSize,
   ];
-}
-
-export function isSingleGrapheme(str: string): boolean {
-  if (str === '') {
-    return false;
-  }
-  const segments = getSegmenter().segment(str);
-  const first = segments.containing(0);
-  return first != null && first.segment === str;
 }
 
 export function hasAtMostGraphemes(str: string, max: number): boolean {

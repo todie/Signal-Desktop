@@ -4,6 +4,10 @@
 import { DataReader, DataWriter } from '../sql/Client.preload.ts';
 import type { ConversationAttributesType } from '../model-types.d.ts';
 import { maybeDeleteAttachmentFile } from './migrations.preload.ts';
+import * as Bytes from '../Bytes.std.ts';
+import { sha256 } from '../Crypto.node.ts';
+import * as RemoteConfig from '../RemoteConfig.dom.ts';
+import { parseIntWithFallback } from './parseIntWithFallback.std.ts';
 
 async function deleteExternalFiles(
   conversation: ConversationAttributesType
@@ -32,4 +36,13 @@ export async function removeConversation(id: string): Promise<void> {
     await DataWriter._removeConversation(id);
     await deleteExternalFiles(existing);
   }
+}
+
+export function computeGroupNameHash(name: string): string {
+  return Bytes.toBase64(sha256(Bytes.fromString(name)));
+}
+
+export function getPinnedConversationLimit(): number {
+  const remoteValue = RemoteConfig.getValue('global.pinnedChatLimit');
+  return parseIntWithFallback(remoteValue, 4);
 }

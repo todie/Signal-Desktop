@@ -37,12 +37,7 @@ import {
 import { ReadStatus } from '../../../messages/MessageReadStatus.std.ts';
 import type { SingleServePromiseIdString } from '../../../services/singleServePromise.std.ts';
 import { CallMode } from '../../../types/CallDisposition.std.ts';
-import {
-  type AciString,
-  type PniString,
-  generateAci,
-  getAciFromPrefix,
-} from '../../../types/ServiceId.std.ts';
+import type { AciString, PniString } from '../../../types/ServiceId.std.ts';
 import { generateStoryDistributionId } from '../../../types/StoryDistributionId.std.ts';
 import {
   getDefaultConversation,
@@ -60,8 +55,8 @@ import type { ShowSendAnywayDialogActionType } from '../../../state/ducks/global
 import { SHOW_SEND_ANYWAY_DIALOG } from '../../../state/ducks/globalModals.preload.ts';
 import type { StoryDistributionListsActionType } from '../../../state/ducks/storyDistributionLists.preload.ts';
 import {
-  DELETE_LIST,
   HIDE_MY_STORIES_FROM,
+  MARK_AS_DELETED,
   MODIFY_LIST,
   VIEWERS_CHANGED,
 } from '../../../state/ducks/storyDistributionLists.preload.ts';
@@ -70,6 +65,10 @@ import type { ReadonlyMessageAttributesType } from '../../../model-types.d.ts';
 import { strictAssert } from '../../../util/assert.std.ts';
 import { getConversationCallMode } from '../../../util/getConversationCallMode.std.ts';
 import { itemStorage } from '../../../textsecure/Storage.preload.ts';
+import {
+  generateAci,
+  getAciFromPrefix,
+} from '../../../test-helpers/serviceIdUtils.std.ts';
 
 const { times } = lodash;
 
@@ -123,7 +122,8 @@ describe('both/state/ducks/conversations', () => {
   const SERVICE_ID_3 = generateAci();
   const SERVICE_ID_4 = generateAci();
 
-  const getEmptyRootState = () => rootReducer(undefined, noopAction());
+  const getEmptyRootState = () =>
+    rootReducer(undefined, noopAction('getEmptyRootState'));
 
   let sinonSandbox: sinon.SinonSandbox;
   let createGroupStub: sinon.SinonStub;
@@ -567,6 +567,7 @@ describe('both/state/ducks/conversations', () => {
 
         assert(
           result.composer?.step === ComposerStep.SetGroupMetadata &&
+            // oxlint-disable-next-line typescript/no-unnecessary-boolean-literal-compare
             result.composer.hasError === false
         );
       });
@@ -2375,7 +2376,7 @@ describe('both/state/ducks/conversations', () => {
         });
       });
     });
-    describe('DELETE_LIST', () => {
+    describe('MARK_AS_DELETED', () => {
       const state: ConversationsStateType = {
         ...getEmptyState(),
         verificationDataByConversation: {
@@ -2400,7 +2401,7 @@ describe('both/state/ducks/conversations', () => {
 
       it('eliminates deleted list entirely', async () => {
         const action: StoryDistributionListsActionType = {
-          type: DELETE_LIST,
+          type: MARK_AS_DELETED,
           payload: {
             deletedAtTimestamp: Date.now(),
             listId: LIST_ID_1,
@@ -2442,7 +2443,7 @@ describe('both/state/ducks/conversations', () => {
         };
 
         const action: StoryDistributionListsActionType = {
-          type: DELETE_LIST,
+          type: MARK_AS_DELETED,
           payload: {
             deletedAtTimestamp: Date.now(),
             listId: LIST_ID_1,
@@ -2474,7 +2475,7 @@ describe('both/state/ducks/conversations', () => {
         };
 
         const action: StoryDistributionListsActionType = {
-          type: DELETE_LIST,
+          type: MARK_AS_DELETED,
           payload: {
             deletedAtTimestamp: Date.now(),
             listId: LIST_ID_1,

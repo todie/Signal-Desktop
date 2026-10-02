@@ -5,6 +5,7 @@ import type { ElectronApplication, Page } from 'playwright';
 import { _electron as electron } from 'playwright';
 import { EventEmitter, once } from 'node:events';
 import pTimeout from 'p-timeout';
+import createDebug from 'debug';
 
 import type {
   IPCRequest as ChallengeRequestType,
@@ -16,6 +17,12 @@ import { drop } from '../util/drop.std.ts';
 import { toNumber } from '../util/toNumber.std.ts';
 import type { MessageAttributesType } from '../model-types.d.ts';
 import type { SocketStatuses } from '../textsecure/SocketManager.preload.ts';
+import type {
+  RestoreResponseType,
+  StoreParameters,
+} from '../textsecure/WebAPI.preload.ts';
+import { toLogFormat } from '../types/errors.std.ts';
+import { fromBase64 } from '../Bytes.std.ts';
 
 export type AppLoadedInfoType = Readonly<{
   loadTime: number;
@@ -49,29 +56,35 @@ export type AppOptionsType = Readonly<{
   config: string;
 }>;
 
+const debug = createDebug('playwright.node.ts');
+
 const WAIT_FOR_EVENT_TIMEOUT = 30 * SECOND;
+const GRACEFUL_CLOSE_TIMEOUT = 5 * SECOND;
 
 export class App extends EventEmitter {
+  readonly #options: AppOptionsType;
   #privApp: ElectronApplication | undefined;
 
-  constructor(private readonly options: AppOptionsType) {
+  constructor(options: AppOptionsType) {
     super();
+    this.#options = options;
   }
 
   public async start(): Promise<void> {
     try {
       // launch the electron processs
       this.#privApp = await electron.launch({
-        executablePath: this.options.main,
-        args: this.options.args.slice(),
+        executablePath: this.#options.main,
+        args: this.#options.args.slice(),
         env: {
           ...process.env,
           MOCK_TEST: 'true',
-          SIGNAL_CI_CONFIG: this.options.config,
+          SIGNAL_CI_CONFIG: this.#options.config,
         },
         locale: 'en',
         timeout: 30 * SECOND,
       });
+      this.#privApp.on('close', () => this.emit('close'));
 
       // wait for the first window to load
       await pTimeout(
@@ -87,16 +100,39 @@ export class App extends EventEmitter {
           await page?.emulateMedia({ reducedMotion: 'reduce' });
           await page?.waitForLoadState('load');
         })(),
-        20 * SECOND
+        { milliseconds: 20 * SECOND }
       );
-    } catch (e) {
-      this.#privApp?.process().kill('SIGKILL');
-      throw e;
+    } catch (error) {
+      await this.#forceClose();
+      throw error;
     }
 
-    this.#privApp.on('close', () => this.emit('close'));
-
     drop(this.#printLoop());
+  }
+
+  async #forceClose(): Promise<void> {
+    const app = this.#privApp;
+    this.#privApp = undefined;
+    if (!app) {
+      return;
+    }
+
+    try {
+      await pTimeout(app.close(), { milliseconds: GRACEFUL_CLOSE_TIMEOUT });
+      return;
+    } catch (error) {
+      debug('graceful close failed', toLogFormat(error));
+    }
+
+    const { pid } = app.process();
+    if (pid !== undefined) {
+      try {
+        // try to kill the whole process group
+        process.kill(-pid, 'SIGKILL');
+      } catch {
+        app.process().kill('SIGKILL');
+      }
+    }
   }
 
   public async waitForProvisionURL(): Promise<string> {
@@ -109,6 +145,10 @@ export class App extends EventEmitter {
 
   public async waitForDbInitialized(): Promise<void> {
     return this.#waitForEvent('db-initialized');
+  }
+
+  public async waitUntilReadyForUpdates(): Promise<void> {
+    return this.#waitForEvent('ready-for-updates');
   }
 
   public async waitUntilLoaded(): Promise<AppLoadedInfoType> {
@@ -144,12 +184,71 @@ export class App extends EventEmitter {
     return this.#waitForEvent('receipts');
   }
 
+  public async waitForPhoneNumberSharedWith(
+    serviceId: string
+  ): Promise<ChallengeRequestType> {
+    return this.#waitForEvent(`sharedPhoneNumber:${serviceId}`);
+  }
+
   public async waitForReleaseNoteAndMegaphoneFetcher(): Promise<void> {
     return this.#waitForEvent('release_notes_fetcher_complete');
   }
 
   public async waitForStorageService(): Promise<StorageServiceInfoType> {
     return this.#waitForEvent('storageServiceComplete');
+  }
+
+  public async waitForUploadManifest(desiredVersion?: bigint): Promise<{
+    version: number;
+    storageKey: Buffer<ArrayBuffer>;
+    recordIkm: Buffer<ArrayBuffer> | undefined;
+  }> {
+    // oxlint-disable-next-line no-constant-condition
+    while (true) {
+      // oxlint-disable-next-line no-await-in-loop
+      const result = (await this.#waitForEvent('uploadManifest')) as
+        | {
+            version: number;
+            storageKeyBase64: string;
+            recordIkmBase64: string | undefined;
+          }
+        | undefined;
+      if (!result) {
+        throw new Error('waitForUploadManifest: Found no data!');
+      }
+
+      const { version, storageKeyBase64, recordIkmBase64 } = result;
+      if (desiredVersion !== undefined && BigInt(version) < desiredVersion) {
+        debug(
+          `waitForUploadManifest: version ${version} is below desired version ${desiredVersion}, trying again...`
+        );
+        continue;
+      }
+
+      debug(`waitForUploadManifest: Returning with version ${version}`);
+
+      const storageKey = Buffer.from(fromBase64(storageKeyBase64));
+      const recordIkm = recordIkmBase64
+        ? Buffer.from(fromBase64(recordIkmBase64))
+        : undefined;
+
+      return { version, storageKey, recordIkm };
+    }
+  }
+
+  public async waitForQueuedStickerPacks(): Promise<void> {
+    return this.#waitForEvent('queuedStickerPacksDownloaded');
+  }
+
+  public async waitForSVRStore(): Promise<StoreParameters> {
+    const result = (await this.#waitForEvent('svrStore')) as {
+      pin: string;
+      dataBase64: string;
+    };
+    return {
+      pin: result.pin,
+      data: fromBase64(result.dataBase64),
+    };
   }
 
   public async waitForManifestVersion(version: bigint): Promise<void> {
@@ -193,6 +292,10 @@ export class App extends EventEmitter {
 
   public async getWindow(): Promise<Page> {
     return this.#app.firstWindow();
+  }
+
+  public async waitForWindow(): Promise<Page> {
+    return this.#app.waitForEvent('window');
   }
 
   public async openSignalRoute(url: URL | string): Promise<void> {
@@ -256,6 +359,11 @@ export class App extends EventEmitter {
     return this.#waitForEvent('conversationOpenComplete');
   }
 
+  public async fetchManifestForPrimary(): Promise<void> {
+    const window = await this.getWindow();
+    return window.evaluate('window.SignalCI.fetchManifestForPrimary()');
+  }
+
   // EventEmitter types
 
   public override on(type: 'close', callback: () => void): this;
@@ -282,6 +390,15 @@ export class App extends EventEmitter {
     );
 
     return toNumber(result as bigint);
+  }
+
+  public async saveSVR2RestoreResponse(
+    response: RestoreResponseType
+  ): Promise<void> {
+    const window = await this.getWindow();
+    return window.evaluate(
+      `window.SignalCI.saveSVR2RestoreResponse(${JSON.stringify(response)})`
+    );
   }
 
   //

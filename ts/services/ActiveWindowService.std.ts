@@ -36,7 +36,7 @@ class ActiveWindowService {
   #lastActiveEventAt = -Infinity;
   #lastActiveNonFocusingEventAt = -Infinity;
   #lastBlurredAt = -Infinity;
-  #callActiveCallbacks: () => void;
+  readonly #callActiveCallbacks: () => void;
 
   constructor() {
     this.#callActiveCallbacks = throttle(() => {
@@ -139,11 +139,11 @@ class ActiveWindowService {
 }
 
 export type ActiveWindowServiceType = {
-  isActive(): boolean;
-  registerForActive(callback: () => void): void;
-  unregisterForActive(callback: () => void): void;
-  registerForChange(callback: (isActive: boolean) => void): void;
-  unregisterForChange(callback: (isActive: boolean) => void): void;
+  isActive: () => boolean;
+  registerForActive: (callback: () => void) => void;
+  unregisterForActive: (callback: () => void) => void;
+  registerForChange: (callback: (isActive: boolean) => void) => void;
+  unregisterForChange: (callback: (isActive: boolean) => void) => void;
 };
 
 export function getActiveWindowService(

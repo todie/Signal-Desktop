@@ -40,10 +40,6 @@ export type VoiceNoteForPlayback = {
   receivedAt: number;
 };
 
-export const isPaused = (state: StateType): boolean => {
-  return state.audioPlayer.active === undefined;
-};
-
 export const selectAudioPlayerActive = (
   state: StateType
 ): ActiveAudioPlayerStateType | undefined => {
@@ -80,6 +76,7 @@ export function extractVoiceNoteForPlayback(
   message: Pick<
     ReadonlyMessageAttributesType,
     | 'id'
+    | 'conversationId'
     | 'type'
     | 'attachments'
     | 'isErased'

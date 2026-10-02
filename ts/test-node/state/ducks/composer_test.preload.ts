@@ -38,7 +38,7 @@ describe('both/state/ducks/composer', () => {
   };
 
   function getRootStateFunction(conversationId?: string) {
-    const state = rootReducer(undefined, noopAction());
+    const state = rootReducer(undefined, noopAction('getRootStateFunction'));
     return () => ({
       ...state,
       nav: {
@@ -152,10 +152,7 @@ describe('both/state/ducks/composer', () => {
       assert.deepEqual(nextState, {
         ...getEmptyState(),
         conversations: {
-          '456': {
-            ...composerState,
-            messageCompositionId: composerState.messageCompositionId,
-          },
+          '456': composerState,
         },
       });
     });

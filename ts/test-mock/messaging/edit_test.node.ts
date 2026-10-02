@@ -19,11 +19,12 @@ import { SendStatus } from '../../messages/MessageSendState.std.ts';
 import { drop } from '../../util/drop.std.ts';
 import { strictAssert } from '../../util/assert.std.ts';
 import { toNumber } from '../../util/toNumber.std.ts';
-import { generateAci } from '../../types/ServiceId.std.ts';
 import { IMAGE_GIF } from '../../types/MIME.std.ts';
 import { typeIntoInput, waitForEnabledComposer } from '../helpers.node.ts';
 import type { MessageAttributesType } from '../../model-types.d.ts';
 import { sleep } from '../../util/sleep.std.ts';
+import { generateAci } from '../../test-helpers/serviceIdUtils.std.ts';
+import { expect } from 'playwright/test';
 
 export const debug = createDebug('mock:test:edit');
 
@@ -169,7 +170,7 @@ describe('editing', function (this: Mocha.Suite) {
     await bootstrap.teardown();
   });
 
-  describe('online', function (this: Mocha.Suite) {
+  describe('online', () => {
     beforeEach(async () => {
       app = await bootstrap.link();
     });
@@ -201,7 +202,7 @@ describe('editing', function (this: Mocha.Suite) {
         .locator('.module-conversation-list__item--contact-or-conversation')
         .first()
         .click();
-      await window.locator('.module-conversation-hero').waitFor();
+      await window.getByTestId('conversation-hero').waitFor();
 
       debug('checking for message');
       await window
@@ -272,7 +273,7 @@ describe('editing', function (this: Mocha.Suite) {
         .locator('.module-conversation-list__item--contact-or-conversation')
         .first()
         .click();
-      await window.locator('.module-conversation-hero').waitFor();
+      await window.getByTestId('conversation-hero').waitFor();
 
       debug('checking for message');
       await window
@@ -352,7 +353,7 @@ describe('editing', function (this: Mocha.Suite) {
         .locator('.module-conversation-list__item--contact-or-conversation')
         .first()
         .click();
-      await window.locator('.module-conversation-hero').waitFor();
+      await window.getByTestId('conversation-hero').waitFor();
 
       debug('checking for message');
       await window.locator('.module-message__text >> "hello"').waitFor();
@@ -422,9 +423,10 @@ describe('editing', function (this: Mocha.Suite) {
         .locator('.module-message__metadata__edited')
         .click();
 
-      const history = await window.locator(
-        '.EditHistoryMessagesModal .module-message'
-      );
+      const history = window
+        .getByRole('dialog', { name: 'Edit History' })
+        .locator('.module-message');
+
       assert.strictEqual(await history.count(), 3);
 
       assert.isTrue(await history.locator('"edit message 1"').isVisible());
@@ -494,7 +496,7 @@ describe('editing', function (this: Mocha.Suite) {
         .locator('.module-conversation-list__item--contact-or-conversation')
         .first()
         .click();
-      await window.locator('.module-conversation-hero').waitFor();
+      await window.getByTestId('conversation-hero').waitFor();
 
       debug('checking for latest message');
       await window.locator('.module-message__text >> "v5"').waitFor();
@@ -540,7 +542,7 @@ describe('editing', function (this: Mocha.Suite) {
         .locator('.module-conversation-list__item--contact-or-conversation')
         .first()
         .click();
-      await window.locator('.module-conversation-hero').waitFor();
+      await window.getByTestId('conversation-hero').waitFor();
 
       debug('checking for latest message');
       await window.locator('.module-message__text >> "v2"').waitFor();
@@ -556,7 +558,8 @@ describe('editing', function (this: Mocha.Suite) {
       ): Promise<MessageAttributesType> {
         await sleep(RECEIPT_BATCHER_WAIT_MS + 20);
         const messages = await page.evaluate(
-          // oxlint-disable-next-line no-undef FIXME
+          // FIXME
+          // oxlint-disable-next-line no-undef
           timestamp => window.SignalCI?.getMessagesBySentAt(timestamp),
           originalMessageTimestamp
         );
@@ -583,7 +586,7 @@ describe('editing', function (this: Mocha.Suite) {
         .locator('.module-conversation-list__item--contact-or-conversation')
         .first()
         .click();
-      await page.locator('.module-conversation-hero').waitFor();
+      await page.getByTestId('conversation-hero').waitFor();
 
       const { dataMessage: profileKeyMsg } = await friend.waitForMessage();
       assert(profileKeyMsg.profileKey != null, 'Profile key message');
@@ -615,7 +618,8 @@ describe('editing', function (this: Mocha.Suite) {
 
       debug("getting friend's conversationId");
       const conversationId = await page.evaluate(
-        // oxlint-disable-next-line no-undef FIXME
+        // FIXME
+        // oxlint-disable-next-line no-undef
         serviceId => window.SignalCI?.getConversationId(serviceId),
         friend.device.aci
       );
@@ -674,6 +678,13 @@ describe('editing', function (this: Mocha.Suite) {
       debug('sending edit message v2 desktop -> friend');
       await sendEditedMessage(page, originalMessageTimestamp, '2', '1');
 
+      debug("waiting for message on friend's device (original)");
+      const { editMessage: editMessageV2 } = await friend.waitForEditMessage();
+      assert.strictEqual(editMessageV2.dataMessage?.body, editMessageV2Text);
+      debug('v2 message', {
+        timestamp: toNumber(editMessageV2.dataMessage?.timestamp),
+      });
+
       {
         const readReceiptTimestamp = bootstrap.getTimestamp();
         debug('sending read receipt for original message friend -> desktop', {
@@ -700,7 +711,7 @@ describe('editing', function (this: Mocha.Suite) {
       }
 
       debug("testing message's send state (current(v2) and original (v1))");
-      {
+      await expect(async () => {
         const message = await getMessageFromApp(originalMessageTimestamp);
         strictAssert(message.editHistory, 'edit history exists');
         // oxlint-disable-next-line typescript/no-unused-vars
@@ -715,14 +726,7 @@ describe('editing', function (this: Mocha.Suite) {
           SendStatus.Read,
           'original message is marked read'
         );
-      }
-
-      debug("waiting for message on friend's device (original)");
-      const { editMessage: editMessageV2 } = await friend.waitForEditMessage();
-      assert.strictEqual(editMessageV2.dataMessage?.body, editMessageV2Text);
-      debug('v2 message', {
-        timestamp: toNumber(editMessageV2.dataMessage?.timestamp),
-      });
+      }).toPass();
 
       // Sending a v3 edited message targetting v2
       // v3 will be read after we receive v4
@@ -797,8 +801,8 @@ describe('editing', function (this: Mocha.Suite) {
       }
 
       debug("testing v4's send state");
-      {
-        debug('getting edited message from app (v4)');
+      // We allow retries here to wait for the read sync to be processed
+      await expect(async () => {
         const message = await getMessageFromApp(originalMessageTimestamp);
 
         strictAssert(
@@ -847,11 +851,11 @@ describe('editing', function (this: Mocha.Suite) {
           message.body,
           'body is same for v4 and main message'
         );
-      }
+      }).toPass();
     });
   });
 
-  describe('offline', function (this: Mocha.Suite) {
+  describe('offline', () => {
     beforeEach(async () => {
       await bootstrap.linkAndClose();
     });
@@ -894,7 +898,7 @@ describe('editing', function (this: Mocha.Suite) {
         .locator('.module-conversation-list__item--contact-or-conversation')
         .first()
         .click();
-      await window.locator('.module-conversation-hero').waitFor();
+      await window.getByTestId('conversation-hero').waitFor();
 
       debug('checking for latest message');
       await window.locator('.module-message__text >> "v2"').waitFor();
@@ -966,7 +970,7 @@ describe('editing', function (this: Mocha.Suite) {
         .locator('.module-conversation-list__item--contact-or-conversation')
         .first()
         .click();
-      await window.locator('.module-conversation-hero').waitFor();
+      await window.getByTestId('conversation-hero').waitFor();
 
       debug('checking for latest message');
       await window.locator('.module-message__text >> "v5"').waitFor();

@@ -1,8 +1,22 @@
 // Copyright 2019 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import * as React from 'react';
-import type { MouseEvent } from 'react';
+import {
+  useState,
+  useRef,
+  useCallback,
+  useImperativeHandle,
+  useEffect,
+  useMemo,
+} from 'react';
+import type {
+  MouseEvent,
+  ReactNode,
+  RefObject,
+  UIEvent,
+  ReactElement,
+  JSX,
+} from 'react';
 import classNames from 'classnames';
 import { Manager, Reference } from 'react-popper';
 import Quill, { Delta } from '@signalapp/quill-cjs';
@@ -26,13 +40,11 @@ import { EmojiBlot, EmojiCompletion } from '../quill/emoji/index.dom.tsx';
 import type {
   DraftBodyRanges,
   HydratedBodyRangesType,
-  RangeNode,
 } from '../types/BodyRange.std.ts';
 import {
   BodyRange,
   areBodyRangesEqual,
-  collapseRangeTree,
-  insertRange,
+  collapseRangesToDisplayNodes,
 } from '../types/BodyRange.std.ts';
 import type { LocalizerType, ThemeType } from '../types/Util.std.ts';
 import type { ConversationType } from '../state/ducks/conversations.preload.ts';
@@ -61,7 +73,7 @@ import { createLogger } from '../logging/log.std.ts';
 import type { LinkPreviewForUIType } from '../types/message/LinkPreviews.std.ts';
 import { StagedLinkPreview } from './conversation/StagedLinkPreview.dom.tsx';
 import type { DraftEditMessageType } from '../model-types.d.ts';
-import { usePrevious } from '../hooks/usePrevious.std.ts';
+import { usePreviousDeprecated } from '../hooks/usePrevious.std.ts';
 import {
   matchBold,
   matchItalic,
@@ -74,19 +86,16 @@ import type { AutoSubstituteAsciiEmojisOptions } from '../quill/auto-substitute-
 import { AutoSubstituteAsciiEmojis } from '../quill/auto-substitute-ascii-emojis/index.dom.tsx';
 import { dropNull } from '../util/dropNull.std.ts';
 import { SimpleQuillWrapper } from './SimpleQuillWrapper.dom.tsx';
-import {
-  getEmojiVariantByKey,
-  type EmojiSkinTone,
-} from './fun/data/emojis.std.ts';
 import { FUN_STATIC_EMOJI_CLASS } from './fun/FunEmoji.dom.tsx';
-import { useFunEmojiSearch } from './fun/useFunEmojiSearch.dom.tsx';
 import type { EmojiCompletionOptions } from '../quill/emoji/completion.dom.tsx';
-import { useFunEmojiLocalizer } from './fun/useFunEmojiLocalizer.dom.tsx';
 import { MAX_BODY_ATTACHMENT_BYTE_LENGTH } from '../util/longAttachment.std.ts';
 import type { FunEmojiSelection } from './fun/panels/FunPanelEmojis.dom.tsx';
 import { AxoSymbol } from '../axo/AxoSymbol.dom.tsx';
 import { AxoTooltip } from '../axo/AxoTooltip.dom.tsx';
 import { tw } from '../axo/tw.dom.tsx';
+import type { Emoji } from '../axo/emoji.std.ts';
+import { RecoveryKeyPasteWarning } from './RecoveryKeyPasteWarning.dom.tsx';
+import { mergeProps, useFocusVisible, useFocusWithin } from 'react-aria';
 
 const log = createLogger('CompositionInput');
 
@@ -106,6 +115,21 @@ Quill.register(
   true
 );
 
+function usePreservedFocusVisibleWithin() {
+  const { isFocusVisible } = useFocusVisible({
+    isTextInput: true,
+  });
+
+  const [isFocusWithin, setFocusWithin] = useState(false);
+  const { focusWithinProps: focusVisibleWithinProps } = useFocusWithin({
+    onFocusWithinChange: setFocusWithin,
+  });
+
+  const isFocusVisibleWithin = isFocusWithin && isFocusVisible;
+
+  return { isFocusVisibleWithin, focusVisibleWithinProps };
+}
+
 export type InputApi = {
   focus: () => void;
   hasFocus: () => boolean;
@@ -120,49 +144,50 @@ export type InputApi = {
 };
 
 export type Props = Readonly<{
-  children?: React.ReactNode;
+  children?: ReactNode;
   conversationId: string | null;
   i18n: LocalizerType;
   disabled?: boolean;
   draftEditMessage: DraftEditMessageType | null;
   getPreferredBadge: PreferredBadgeSelectorType;
   large: boolean | null;
-  inputApi: React.RefObject<InputApi | null> | null;
+  inputApi: RefObject<InputApi | null> | null;
   isFormattingEnabled: boolean;
   isActive: boolean;
   sendCounter: number;
-  emojiSkinToneDefault: EmojiSkinTone | null;
+  emojiSkinToneDefault: Emoji.SkinTone | null;
   draftText: string | null;
   draftBodyRanges: HydratedBodyRangesType | null;
   moduleClassName?: string;
   theme: ThemeType;
   placeholder?: string;
   sortedGroupMembers: ReadonlyArray<ConversationType> | null;
-  onDirtyChange?(dirty: boolean): unknown;
-  onEditorStateChange(options: {
+  onDirtyChange?: (dirty: boolean) => unknown;
+  onEditorStateChange: (options: {
     bodyRanges: DraftBodyRanges;
     caretLocation?: number;
     conversationId: string | undefined;
     messageText: string;
     sendCounter: number;
-  }): unknown;
-  onTextTooLong(): unknown;
+  }) => unknown;
+  onTextTooLong: () => unknown;
   onSelectEmoji: (emojiSelection: FunEmojiSelection) => void;
   onBlur?: () => unknown;
   onFocus?: () => unknown;
-  onSubmit(
+  onSubmit: (
     message: string,
     bodyRanges: DraftBodyRanges,
     timestamp: number
-  ): unknown;
-  onScroll?: (ev: React.UIEvent<HTMLElement>) => void;
+  ) => unknown;
+  onScroll?: (ev: UIEvent<HTMLElement>) => void;
   ourConversationId: string | undefined;
   platform: string;
+  showRecoveryKeyPasteWarning: false | ((pastedText: string) => boolean);
   quotedMessageId: string | null;
   shouldHidePopovers: boolean | null;
   linkPreviewLoading?: boolean;
   linkPreviewResult: LinkPreviewForUIType | null;
-  onCloseLinkPreview?(conversationId: string): unknown;
+  onCloseLinkPreview?: (conversationId: string) => unknown;
   showViewOnceButton: boolean;
   isViewOnceActive: boolean;
   onToggleViewOnce: () => void;
@@ -170,7 +195,7 @@ export type Props = Readonly<{
 
 const BASE_CLASS_NAME = 'module-composition-input';
 
-export function CompositionInput(props: Props): React.ReactElement {
+export function CompositionInput(props: Props): ReactElement {
   const {
     children,
     conversationId,
@@ -205,41 +230,38 @@ export function CompositionInput(props: Props): React.ReactElement {
     showViewOnceButton,
     isViewOnceActive,
     onToggleViewOnce,
+    showRecoveryKeyPasteWarning,
   } = props;
 
   const [emojiCompletionElement, setEmojiCompletionElement] =
-    React.useState<React.JSX.Element | null>();
+    useState<JSX.Element | null>();
   const [formattingChooserElement, setFormattingChooserElement] =
-    React.useState<React.JSX.Element>();
+    useState<JSX.Element>();
   const [lastSelectionRange, setLastSelectionRange] =
-    React.useState<RangeStatic | null>(null);
+    useState<RangeStatic | null>(null);
   const [mentionCompletionElement, setMentionCompletionElement] =
-    React.useState<React.JSX.Element>();
+    useState<JSX.Element>();
 
-  const emojiCompletionRef = React.useRef<EmojiCompletion>(undefined);
-  const mentionCompletionRef = React.useRef<MentionCompletion>(undefined);
-  const quillRef = React.useRef<Quill>(undefined);
+  const emojiCompletionRef = useRef<EmojiCompletion>(undefined);
+  const mentionCompletionRef = useRef<MentionCompletion>(undefined);
+  const quillRef = useRef<Quill>(undefined);
 
-  const propsRef = React.useRef<Props>(props);
-  const canSendRef = React.useRef<boolean>(false);
-  const memberRepositoryRef = React.useRef<MemberRepository>(
-    new MemberRepository()
-  );
+  const propsRef = useRef<Props>(props);
+  const canSendRef = useRef<boolean>(false);
+  const memberRepositoryRef = useRef<MemberRepository>(new MemberRepository());
 
-  const [isMouseDown, setIsMouseDown] = React.useState<boolean>(false);
+  const [isMouseDown, setIsMouseDown] = useState<boolean>(false);
+
+  const { isFocusVisibleWithin, focusVisibleWithinProps } =
+    usePreservedFocusVisibleWithin();
 
   const generateDelta = (
     text: string,
     bodyRanges: HydratedBodyRangesType
   ): Delta => {
     const textLength = text.length;
-    const tree = bodyRanges.reduce<ReadonlyArray<RangeNode>>((acc, range) => {
-      if (range.start < textLength) {
-        return insertRange(range, acc);
-      }
-      return acc;
-    }, []);
-    const nodes = collapseRangeTree({ tree, text });
+    const preparedRanges = bodyRanges.filter(range => range.start < textLength);
+    const nodes = collapseRangesToDisplayNodes(text, preparedRanges);
     const opsWithFormattingAndMentions = insertFormattingAndMentionsOps(nodes);
     const opsWithEmojis = insertEmojiOps(opsWithFormattingAndMentions, {});
 
@@ -284,7 +306,7 @@ export function CompositionInput(props: Props): React.ReactElement {
     };
   };
 
-  const focus = React.useCallback(() => {
+  const focus = useCallback(() => {
     const quill = quillRef.current;
 
     if (quill === undefined) {
@@ -294,7 +316,7 @@ export function CompositionInput(props: Props): React.ReactElement {
     quill.focus();
   }, []);
 
-  const insertEmoji = React.useCallback(
+  const insertEmoji = useCallback(
     (emojiSelection: FunEmojiSelection) => {
       const quill = quillRef.current;
 
@@ -309,12 +331,10 @@ export function CompositionInput(props: Props): React.ReactElement {
         return;
       }
 
-      const emojiVariant = getEmojiVariantByKey(emojiSelection.variantKey);
-
       const delta = new Delta()
         .retain(insertionRange.index)
         .delete(insertionRange.length)
-        .insert({ emoji: { value: emojiVariant.value } });
+        .insert({ emoji: { value: emojiSelection.emoji } });
 
       quill.updateContents(delta, 'user');
       quill.setSelection(insertionRange.index + 1, 0, 'user');
@@ -322,7 +342,7 @@ export function CompositionInput(props: Props): React.ReactElement {
     [lastSelectionRange]
   );
 
-  const reset = React.useCallback(() => {
+  const reset = useCallback(() => {
     const quill = quillRef.current;
 
     if (quill === undefined) {
@@ -335,7 +355,7 @@ export function CompositionInput(props: Props): React.ReactElement {
     quill.history.clear();
   }, []);
 
-  const setContents = React.useCallback(
+  const setContents = useCallback(
     (
       text: string,
       bodyRanges?: HydratedBodyRangesType,
@@ -352,13 +372,15 @@ export function CompositionInput(props: Props): React.ReactElement {
       canSendRef.current = true;
       quill.setContents(delta);
       if (cursorToEnd) {
-        quill.setSelection(quill.getLength(), 0);
+        // Waiting a tick here helps cursor positioning with custom blots
+        // that do not have surrounding guards
+        setTimeout(() => quill.setSelection(quill.getLength(), 0), 0);
       }
     },
     []
   );
 
-  const submit = React.useCallback(() => {
+  const submit = useCallback(() => {
     const timestamp = Date.now();
     const quill = quillRef.current;
 
@@ -384,11 +406,11 @@ export function CompositionInput(props: Props): React.ReactElement {
     }
   }, [onSubmit]);
 
-  const hasFocus = React.useCallback(() => {
+  const hasFocus = useCallback(() => {
     return quillRef.current?.hasFocus() ?? false;
   }, []);
 
-  React.useImperativeHandle(inputApi, () => {
+  useImperativeHandle(inputApi, () => {
     return {
       focus,
       hasFocus,
@@ -399,11 +421,11 @@ export function CompositionInput(props: Props): React.ReactElement {
     };
   }, [focus, hasFocus, insertEmoji, reset, setContents, submit]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     propsRef.current = props;
   }, [props]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     canSendRef.current = !disabled;
   }, [disabled]);
 
@@ -412,13 +434,13 @@ export function CompositionInput(props: Props): React.ReactElement {
     return false;
   };
 
-  const previousFormattingEnabled = usePrevious(
+  const previousFormattingEnabled = usePreviousDeprecated(
     isFormattingEnabled,
     isFormattingEnabled
   );
-  const previousIsMouseDown = usePrevious(isMouseDown, isMouseDown);
+  const previousIsMouseDown = usePreviousDeprecated(isMouseDown, isMouseDown);
 
-  React.useEffect(() => {
+  useEffect(() => {
     const formattingChanged =
       typeof previousFormattingEnabled === 'boolean' &&
       previousFormattingEnabled !== isFormattingEnabled;
@@ -446,7 +468,24 @@ export function CompositionInput(props: Props): React.ReactElement {
     previousIsMouseDown,
   ]);
 
-  React.useEffect(() => {
+  const [onRecoveryKeyPasteConfirm, setOnRecoveryKeyPasteConfirm] =
+    useState<null | { onAllowPaste: () => void }>(null);
+
+  const showRecoveryKeyPasteWarningHandler = useCallback(
+    (text: string, onAllowPaste: () => void) => {
+      if (
+        showRecoveryKeyPasteWarning === false ||
+        !showRecoveryKeyPasteWarning(text)
+      ) {
+        return { isHandlingPaste: false };
+      }
+      setOnRecoveryKeyPasteConfirm({ onAllowPaste });
+      return { isHandlingPaste: true };
+    },
+    [showRecoveryKeyPasteWarning]
+  );
+
+  useEffect(() => {
     const signalClipboard = quillRef.current?.getModule('signalClipboard');
     if (!signalClipboard) {
       return;
@@ -459,8 +498,9 @@ export function CompositionInput(props: Props): React.ReactElement {
 
     signalClipboard.updateOptions({
       isDisabled: !isActive,
+      pasteHandlers: [showRecoveryKeyPasteWarningHandler],
     });
-  }, [isActive]);
+  }, [isActive, showRecoveryKeyPasteWarningHandler]);
 
   const onEnter = (): boolean => {
     const quill = quillRef.current;
@@ -570,6 +610,15 @@ export function CompositionInput(props: Props): React.ReactElement {
       return true;
     }
 
+    // If the cursor is at the beginning of a line, getLeaf() returns the blot that starts
+    // that line, even though the cursor is actually before it (offset === 0)
+    if (
+      (isMentionBlot(blotToDelete) || isEmojiBlot(blotToDelete)) &&
+      offset === 0
+    ) {
+      return true;
+    }
+
     // To match macOS option-delete, search back through non-newline whitespace
     if (context.event.altKey && platform === 'darwin') {
       const value = blotToDelete.value();
@@ -635,7 +684,8 @@ export function CompositionInput(props: Props): React.ReactElement {
         node.attributes.removeNamedItem('style');
       }
 
-      // oxlint-disable-next-line no-undef FIXME
+      // FIXME
+      // oxlint-disable-next-line no-undef
       if (Buffer.byteLength(text) > MAX_BODY_ATTACHMENT_BYTE_LENGTH) {
         quill.history.undo();
         propsRef.current.onTextTooLong();
@@ -665,15 +715,15 @@ export function CompositionInput(props: Props): React.ReactElement {
     }
 
     if (propsRef.current.onDirtyChange) {
-      let isDirty: boolean = false;
+      let isDirty = false;
 
       if (!draftEditMessage) {
         isDirty = text.length > 0;
       } else if (text.trimEnd() !== draftEditMessage.body.trimEnd()) {
         isDirty = true;
-      } else if (bodyRanges.length !== draftEditMessage.bodyRanges?.length) {
-        isDirty = true;
-      } else if (!areBodyRangesEqual(bodyRanges, draftEditMessage.bodyRanges)) {
+      } else if (
+        !areBodyRangesEqual(bodyRanges, draftEditMessage.bodyRanges ?? [])
+      ) {
         isDirty = true;
       } else if (dropNull(quotedMessageId) !== draftEditMessage.quote?.id) {
         isDirty = true;
@@ -683,7 +733,7 @@ export function CompositionInput(props: Props): React.ReactElement {
     }
   };
 
-  React.useEffect(() => {
+  useEffect(() => {
     const quill = quillRef.current;
 
     if (quill === undefined) {
@@ -694,7 +744,7 @@ export function CompositionInput(props: Props): React.ReactElement {
     quill.focus();
   }, [disabled]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     const quill = quillRef.current;
 
     if (quill === undefined) {
@@ -717,7 +767,7 @@ export function CompositionInput(props: Props): React.ReactElement {
     };
   }, [onFocus, onBlur]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     const emojiCompletion = emojiCompletionRef.current;
 
     if (emojiCompletion == null) {
@@ -727,7 +777,7 @@ export function CompositionInput(props: Props): React.ReactElement {
     emojiCompletion.options.emojiSkinToneDefault = emojiSkinToneDefault;
   }, [emojiSkinToneDefault]);
 
-  React.useEffect(
+  useEffect(
     () => () => {
       const emojiCompletion = emojiCompletionRef.current;
       const mentionCompletion = mentionCompletionRef.current;
@@ -767,16 +817,15 @@ export function CompositionInput(props: Props): React.ReactElement {
 
     const newDelta = getDeltaToRemoveStaleMentions(ops, currentMemberAcis);
 
-    // oxlint-disable-next-line typescript/no-explicit-any
-    quill.updateContents(newDelta as any);
+    quill.updateContents(newDelta);
   };
 
-  const memberIdList = React.useMemo(() => {
+  const memberIdList = useMemo(() => {
     return JSON.stringify(sortedGroupMembers?.map(mem => mem.id));
   }, [sortedGroupMembers]);
-  const previousMemberIdList = usePrevious(undefined, memberIdList);
+  const previousMemberIdList = usePreviousDeprecated(undefined, memberIdList);
 
-  React.useEffect(() => {
+  useEffect(() => {
     memberRepositoryRef.current.updateMembers(sortedGroupMembers || []);
     if (memberIdList !== previousMemberIdList) {
       removeStaleMentions(sortedGroupMembers || []);
@@ -796,13 +845,10 @@ export function CompositionInput(props: Props): React.ReactElement {
     onShortKeyEnter,
     onTab,
   };
-  const callbacksRef = React.useRef(unstaleCallbacks);
+  const callbacksRef = useRef(unstaleCallbacks);
   callbacksRef.current = unstaleCallbacks;
 
-  const emojiSearch = useFunEmojiSearch();
-  const emojiLocalizer = useFunEmojiLocalizer();
-
-  const reactQuill = React.useMemo(
+  const reactQuill = useMemo(
     () => {
       const delta = generateDelta(draftText || '', draftBodyRanges || []);
 
@@ -867,8 +913,6 @@ export function CompositionInput(props: Props): React.ReactElement {
               onSelectEmoji: (emojiSelection: FunEmojiSelection) =>
                 callbacksRef.current.onSelectEmoji(emojiSelection),
               emojiSkinToneDefault,
-              emojiSearch,
-              emojiLocalizer,
             } satisfies EmojiCompletionOptions,
             autoSubstituteAsciiEmojis: {
               emojiSkinToneDefault,
@@ -972,7 +1016,7 @@ export function CompositionInput(props: Props): React.ReactElement {
 
   const getClassName = getClassNamesFor(BASE_CLASS_NAME, moduleClassName);
 
-  const onMouseDown = React.useCallback(
+  const onMouseDown = useCallback(
     (event: MouseEvent<HTMLDivElement>) => {
       const { currentTarget } = event;
       // If the user is actually clicking the format menu, we drop this event
@@ -984,7 +1028,7 @@ export function CompositionInput(props: Props): React.ReactElement {
     [setIsMouseDown]
   );
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (!isMouseDown) {
       return;
     }
@@ -1006,7 +1050,6 @@ export function CompositionInput(props: Props): React.ReactElement {
     <Manager>
       <Reference>
         {({ ref }) => (
-          // oxlint-disable-next-line jsx_a11y/no-static-element-interactions
           <div
             className={classNames(
               getClassName('__input'),
@@ -1017,8 +1060,19 @@ export function CompositionInput(props: Props): React.ReactElement {
             ref={ref}
             data-testid="CompositionInput"
             data-enabled={isInputEnabled ? 'true' : 'false'}
-            onMouseDown={onMouseDown}
+            data-focus-visible={isFocusVisibleWithin}
+            {...mergeProps(focusVisibleWithinProps, { onMouseDown })}
           >
+            {onRecoveryKeyPasteConfirm ? (
+              <RecoveryKeyPasteWarning
+                i18n={i18n}
+                onCancel={() => setOnRecoveryKeyPasteConfirm(null)}
+                onConfirm={() => {
+                  setOnRecoveryKeyPasteConfirm(null);
+                  onRecoveryKeyPasteConfirm.onAllowPaste();
+                }}
+              />
+            ) : null}
             {draftEditMessage && (
               <div className={getClassName('__editing-message')}>
                 {i18n('icu:CompositionInput__editing-message')}
@@ -1082,14 +1136,13 @@ export function CompositionInput(props: Props): React.ReactElement {
                     onClick={onToggleViewOnce}
                     className={tw(
                       'flex cursor-default items-center justify-center rounded-full',
-                      'outline-border-focused not-forced-colors:outline-0 not-forced-colors:focused:outline-[2.5px]',
+                      'focus-visible:axo-focus-ring',
                       'forced-colors:border forced-colors:border-[ButtonBorder]'
                     )}
                   >
                     <AxoSymbol.Icon
                       size={20}
                       symbol={isViewOnceActive ? 'viewonce' : 'viewonce-slash'}
-                      weight={300}
                       label={null}
                     />
                   </button>

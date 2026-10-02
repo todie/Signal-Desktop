@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type { ComponentProps } from 'react';
-import React, { memo, useCallback } from 'react';
+import { memo, useCallback } from 'react';
 import { useSelector } from 'react-redux';
 
 import { getIntl } from '../selectors/user.std.ts';
@@ -30,8 +30,9 @@ export const SmartInstallScreen = memo(function SmartInstallScreen() {
   const i18n = useSelector(getIntl);
   const installerState = useSelector(getInstallerState);
   const updates = useSelector(getUpdatesState);
-  const { startInstaller, retryBackupImport } = useInstallerActions();
-  const { startUpdate, forceUpdate } = useUpdatesActions();
+  const { continueInstallWithDataDeletion, startInstaller, retryBackupImport } =
+    useInstallerActions();
+  const { startUpdate, forceCheck } = useUpdatesActions();
   const hasExpired = useSelector(hasExpiredSelector);
 
   const onCancelBackupImport = useCallback((): void => {
@@ -55,8 +56,11 @@ export const SmartInstallScreen = memo(function SmartInstallScreen() {
           updates,
           currentVersion: window.getVersion(),
           startUpdate,
-          forceUpdate,
+          forceCheck,
           retryGetQrCode: startInstaller,
+          isConfirmingDataDeletion: installerState.isConfirmingDataDeletion,
+          restartInstall: startInstaller,
+          continueInstallWithDataDeletion,
           OS: OS.getName(),
           isStaging: isStagingServer(),
         },
@@ -78,7 +82,7 @@ export const SmartInstallScreen = memo(function SmartInstallScreen() {
           onRetry: retryBackupImport,
           updates,
           currentVersion: window.getVersion(),
-          forceUpdate,
+          forceCheck,
           startUpdate,
           OS: OS.getName(),
         },

@@ -29,7 +29,7 @@ import type {
   PinMessageData,
   ReadonlyMessageAttributesType,
 } from '../../model-types.d.ts';
-import type { NoopActionType } from './noop.std.ts';
+import { noopAction, type NoopActionType } from './noop.std.ts';
 import type { ShowToastActionType } from './toast.preload.ts';
 import type { StateType as RootStateType } from '../reducer.preload.ts';
 import { createLogger } from '../../logging/log.std.ts';
@@ -109,6 +109,8 @@ import {
   getSelectedConversationId,
 } from '../selectors/nav.std.ts';
 import { isPoll } from '../../messages/helpers.std.ts';
+import type { Emoji } from '../../axo/emoji.std.ts';
+import { isFeaturedEnabledNoRedux } from '../../util/isFeatureEnabled.dom.ts';
 
 const { debounce, isEqual } = lodash;
 
@@ -123,7 +125,6 @@ type ComposerStateByConversationType = {
   isViewOnce: boolean;
   linkPreviewLoading: boolean;
   linkPreviewResult?: LinkPreviewForUIType;
-  messageCompositionId: string;
   quotedMessage?: QuotedMessageForComposerType;
   sendCounter: number;
   shouldSendHighQualityAttachments?: boolean;
@@ -148,7 +149,6 @@ function getEmptyComposerState(): ComposerStateByConversationType {
     disabledCounter: 0,
     isViewOnce: false,
     linkPreviewLoading: false,
-    messageCompositionId: generateUuid(),
     sendCounter: 0,
   };
 }
@@ -334,10 +334,7 @@ function onClearAttachments(conversationId: string): NoopActionType {
     conversation.get('draftAttachments')
   );
 
-  return {
-    type: 'NOOP',
-    payload: null,
-  };
+  return noopAction('onClearAttachments');
 }
 
 function cancelJoinRequest(conversationId: string): NoopActionType {
@@ -352,20 +349,14 @@ function cancelJoinRequest(conversationId: string): NoopActionType {
     task: async () => conversation.cancelJoinRequest(),
   });
 
-  return {
-    type: 'NOOP',
-    payload: null,
-  };
+  return noopAction('cancelJoinRequest');
 }
 
 function onCloseLinkPreview(conversationId: string): NoopActionType {
   suspendLinkPreviews();
   removeLinkPreview(conversationId);
 
-  return {
-    type: 'NOOP',
-    payload: null,
-  };
+  return noopAction('onCloseLinkPreview');
 }
 
 function onTextTooLong(): ShowToastActionType {
@@ -613,7 +604,9 @@ function sendEditedMessage(
   void,
   RootStateType,
   unknown,
-  UpdateComposerDisabledActionType | ShowToastActionType
+  | UpdateComposerDisabledActionType
+  | ShowToastActionType
+  | IncrementSendActionType
 > {
   return async dispatch => {
     const conversation = window.ConversationController.get(conversationId);
@@ -639,6 +632,7 @@ function sendEditedMessage(
           quoteSentAt,
           targetMessageId,
         });
+        dispatch(incrementSendCounter(conversationId));
       } catch (error) {
         log.error('sendEditedMessage', Errors.toLogFormat(error));
         if (error.toastType) {
@@ -772,9 +766,12 @@ function sendStickerMessage(
   void,
   RootStateType,
   unknown,
-  NoopActionType | ShowToastActionType
+  | NoopActionType
+  | ShowToastActionType
+  | IncrementSendActionType
+  | SetQuotedMessageActionType
 > {
-  return async dispatch => {
+  return async (dispatch, getState) => {
     const conversation = window.ConversationController.get(conversationId);
     if (!conversation) {
       throw new Error('sendStickerMessage: No conversation found');
@@ -802,16 +799,54 @@ function sendStickerMessage(
         return;
       }
 
+      const isStickerReplySendEnabled = isFeaturedEnabledNoRedux({
+        betaKey: 'desktop.stickerReply.send.beta',
+        prodKey: 'desktop.stickerReply.send.prod',
+      });
+
+      let sendStickerMessageOptions;
+      if (isStickerReplySendEnabled) {
+        const state = getState();
+        const conversationComposerState = getComposerStateForConversation(
+          state.composer,
+          conversationId
+        );
+        const quote = conversationComposerState.quotedMessage?.quote;
+
+        const draft = conversation.get('draft');
+        const isDraftPresent =
+          (draft != null && draft.length > 0) ||
+          conversationComposerState.attachments.length > 0;
+
+        sendStickerMessageOptions = {
+          quote,
+          extraReduxActions: isDraftPresent
+            ? undefined
+            : () => {
+                setQuoteByMessageId(conversationId, undefined)(
+                  dispatch,
+                  getState,
+                  undefined
+                );
+              },
+        };
+      } else {
+        sendStickerMessageOptions = undefined;
+      }
+
       const { packId, stickerId } = options;
-      void conversation.sendStickerMessage(packId, stickerId);
+      drop(
+        conversation.sendStickerMessage(
+          packId,
+          stickerId,
+          sendStickerMessageOptions
+        )
+      );
     } catch (error) {
       log.error('clickSend error:', Errors.toLogFormat(error));
     }
 
-    dispatch({
-      type: 'NOOP',
-      payload: null,
-    });
+    dispatch(noopAction('sendStickerMessage'));
   };
 }
 
@@ -857,10 +892,7 @@ function sendPoll(
       log.error('sendPoll error:', Errors.toLogFormat(error));
     }
 
-    dispatch({
-      type: 'NOOP',
-      payload: null,
-    });
+    dispatch(noopAction('sendPoll'));
   };
 }
 
@@ -1158,10 +1190,7 @@ function onEditorStateChange({
       conversationId,
     });
 
-    dispatch({
-      type: 'NOOP',
-      payload: null,
-    });
+    dispatch(noopAction('onEditorStateChange'));
   };
 }
 
@@ -1202,8 +1231,12 @@ function processAttachments({
 
     const { audioRecorder } = getState();
 
-    if (hasLinkPreviewLoaded() || getIsRecording(audioRecorder)) {
+    if (getIsRecording(audioRecorder)) {
       return;
+    }
+
+    if (hasLinkPreviewLoaded()) {
+      removeLinkPreview(conversationId);
     }
 
     let toastToShow: AnyToast | undefined;
@@ -1285,10 +1318,7 @@ function processAttachments({
       return;
     }
 
-    dispatch({
-      type: 'NOOP',
-      payload: null,
-    });
+    dispatch(noopAction('processAttachments'));
   };
 }
 
@@ -1454,7 +1484,7 @@ export function replaceAttachments(
 
 function reactToMessage(
   messageId: string,
-  reaction: { emoji: string; remove: boolean }
+  reaction: { emoji: Emoji.Variant; remove: boolean }
 ): ThunkAction<
   void,
   RootStateType,
@@ -1469,10 +1499,7 @@ function reactToMessage(
         emoji,
         remove,
       });
-      dispatch({
-        type: 'NOOP',
-        payload: null,
-      });
+      dispatch(noopAction('reactToMessage'));
     } catch (error) {
       log.error(
         'reactToMessage: Error sending reaction',
@@ -1501,10 +1528,7 @@ function endPoll(
   return async dispatch => {
     try {
       await enqueuePollTerminateForSend({ messageId });
-      dispatch({
-        type: 'NOOP',
-        payload: null,
-      });
+      dispatch(noopAction('endPoll'));
     } catch (error) {
       log.error('endPoll: Error sending poll terminate', error, messageId);
       dispatch({

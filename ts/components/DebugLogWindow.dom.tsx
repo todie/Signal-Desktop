@@ -1,9 +1,8 @@
 // Copyright 2015 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import type { MouseEvent } from 'react';
-import React, { useEffect, useState } from 'react';
-import copyText from 'copy-text-to-clipboard';
+import type { MouseEvent, JSX } from 'react';
+import { useEffect, useState } from 'react';
 import type { LocalizerType } from '../types/Util.std.ts';
 import * as Errors from '../types/errors.std.ts';
 import type { AnyToast } from '../types/Toast.dom.tsx';
@@ -42,7 +41,7 @@ export function DebugLogWindow({
   fetchLogs,
   uploadLogs,
   mode = 'submit',
-}: PropsType): React.JSX.Element {
+}: PropsType): JSX.Element {
   const [loadState, setLoadState] = useState<LoadState>(LoadState.NotStarted);
   const [logText, setLogText] = useState<string | undefined>();
   const [publicLogURL, setPublicLogURL] = useState<string | undefined>();
@@ -54,6 +53,7 @@ export function DebugLogWindow({
   useEscapeHandling(closeWindow);
 
   useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect
     setLoadState(LoadState.Started);
 
     let shouldCancel = false;
@@ -111,9 +111,9 @@ export function DebugLogWindow({
   }
 
   if (publicLogURL) {
-    const copyLog = (ev: MouseEvent) => {
+    const copyLog = async (ev: MouseEvent) => {
       ev.preventDefault();
-      copyText(publicLogURL);
+      await navigator.clipboard.writeText(publicLogURL);
       setToast({ toastType: ToastType.LinkCopied });
     };
 
@@ -161,6 +161,7 @@ export function DebugLogWindow({
           onUndoArchive={shouldNeverBeCalled}
           retryCallQualitySurvey={shouldNeverBeCalled}
           openFileInFolder={shouldNeverBeCalled}
+          saveHeapSnapshot={shouldNeverBeCalled}
           setDidResumeDonation={shouldNeverBeCalled}
           toast={toast}
           containerWidthBreakpoint={null}
@@ -228,6 +229,7 @@ export function DebugLogWindow({
         onUndoArchive={shouldNeverBeCalled}
         retryCallQualitySurvey={shouldNeverBeCalled}
         openFileInFolder={shouldNeverBeCalled}
+        saveHeapSnapshot={shouldNeverBeCalled}
         setDidResumeDonation={shouldNeverBeCalled}
         toast={toast}
         containerWidthBreakpoint={null}

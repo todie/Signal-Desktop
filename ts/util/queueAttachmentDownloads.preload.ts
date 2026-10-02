@@ -12,7 +12,7 @@ import {
 import { DataWriter } from '../sql/Client.preload.ts';
 
 import type { AttachmentType, ThumbnailType } from '../types/Attachment.std.ts';
-import type { EmbeddedContactType } from '../types/EmbeddedContact.std.ts';
+import type { AutoDownloadAttachmentType } from '../types/StorageKeys.std.ts';
 import type {
   EditHistoryType,
   MessageAttributesType,
@@ -29,7 +29,7 @@ import {
   getUndownloadedAttachmentSignature,
 } from './Attachment.std.ts';
 import { AttachmentDownloadUrgency } from '../types/AttachmentDownload.std.ts';
-import type { StickerType } from '../types/Stickers.preload.ts';
+import { getMaximumAutoDownloadSize } from '../types/AttachmentSize.std.ts';
 import type { LinkPreviewType } from '../types/message/LinkPreviews.std.ts';
 import { strictAssert } from './assert.std.ts';
 import { isNotNil } from './isNotNil.std.ts';
@@ -50,18 +50,12 @@ import {
   itemStorage,
   DEFAULT_AUTO_DOWNLOAD_ATTACHMENT,
 } from '../textsecure/Storage.preload.ts';
+import * as RemoteConfig from '../RemoteConfig.dom.ts';
 
 const defaultLogger = createLogger('queueAttachmentDownloads');
 
-export type MessageAttachmentsDownloadedType = {
-  bodyAttachment?: AttachmentType;
-  attachments: ReadonlyArray<AttachmentType>;
-  editHistory?: ReadonlyArray<EditHistoryType>;
-  preview: ReadonlyArray<LinkPreviewType>;
-  contact: ReadonlyArray<EmbeddedContactType>;
-  quote?: QuotedMessageType;
-  sticker?: StickerType;
-};
+const MAX_STICKER_AUTO_DOWNLOAD_SIZE = 100 * 1024;
+const MAX_VOICE_MESSAGE_AUTO_DOWNLOAD_SIZE = 100 * 1024;
 
 function getLogger(source: AttachmentDownloadSource) {
   const verbose =
@@ -75,9 +69,7 @@ export async function handleAttachmentDownloadsForNewMessage(
   message: MessageModel,
   conversation: ConversationModel
 ): Promise<void> {
-  const logId =
-    `handleAttachmentDownloadsForNewMessage/${conversation.idForLogging()} ` +
-    `${getMessageIdForLogging(message.attributes)}`;
+  const logId = `handleAttachmentDownloadsForNewMessage/${conversation.idForLogging()} ${getMessageIdForLogging(message.attributes)}`;
 
   // Only queue attachments for downloads if this is a story (with additional logic), or
   // if it's either an outgoing message or we've accepted the conversation
@@ -118,6 +110,26 @@ export async function queueAttachmentDownloadsAndMaybeSaveMessage(
   await queueUpdateMessage(message.attributes);
 }
 
+function isAutoDownloadEnabled(
+  attachment: Pick<AttachmentType, 'size'>,
+  disposition: keyof AutoDownloadAttachmentType
+): boolean {
+  const autoDownloadAttachment = itemStorage.get(
+    'auto-download-attachment',
+    DEFAULT_AUTO_DOWNLOAD_ATTACHMENT
+  );
+
+  if (!autoDownloadAttachment[disposition]) {
+    return false;
+  }
+
+  if (attachment.size >= getMaximumAutoDownloadSize(RemoteConfig.getValue)) {
+    return false;
+  }
+
+  return true;
+}
+
 // Receive logic
 // NOTE: If you're changing any logic in this function that deals with the
 // count then you'll also have to modify ./hasAttachmentsDownloads
@@ -145,11 +157,6 @@ export async function queueAttachmentDownloads(
       getUndownloadedAttachmentSignature(attachment)
     );
   }
-
-  const autoDownloadAttachment = itemStorage.get(
-    'auto-download-attachment',
-    DEFAULT_AUTO_DOWNLOAD_ATTACHMENT
-  );
 
   const messageId = message.id;
   const idForLogging = getMessageIdForLogging(message.attributes);
@@ -295,7 +302,7 @@ export async function queueAttachmentDownloads(
       }
 
       if (!isManualDownload) {
-        if (autoDownloadAttachment.photos === false) {
+        if (!isAutoDownloadEnabled(item.avatar.avatar, 'photos')) {
           return item;
         }
       }
@@ -346,7 +353,6 @@ export async function queueAttachmentDownloads(
         const data = await copyStickerToAttachments({
           packId,
           stickerId,
-          messageId,
         });
         // Refresh sticker attachment since we had to await above
         const freshSticker = message.get('sticker');
@@ -367,7 +373,10 @@ export async function queueAttachmentDownloads(
     }
 
     if (!copiedSticker) {
-      if (sticker.data) {
+      if (
+        sticker.data &&
+        (isManualDownload || sticker.data.size < MAX_STICKER_AUTO_DOWNLOAD_SIZE)
+      ) {
         if (shouldQueueAttachmentBasedOnSignature(sticker.data)) {
           log.info(`${logId}: Queueing sticker download`);
           count += 1;
@@ -475,7 +484,7 @@ export async function queueAttachmentDownloads(
   return false;
 }
 
-export async function queueNormalAttachments({
+async function queueNormalAttachments({
   attachments = [],
   isManualDownload,
   logId,
@@ -510,7 +519,7 @@ export async function queueNormalAttachments({
   // than once.
   // We don't also register the signatures for "attachments" because they would
   // then not be added to the AttachmentDownloads job.
-  const attachmentSignatures: Map<string, AttachmentType> = new Map();
+  const attachmentSignatures = new Map<string, AttachmentType>();
   otherAttachments?.forEach(attachment => {
     cacheAttachmentBySignature(attachmentSignatures, attachment);
   });
@@ -558,27 +567,28 @@ export async function queueNormalAttachments({
 
       const { contentType } = attachment;
       if (!isManualDownload) {
-        const autoDownloadAttachment = itemStorage.get(
-          'auto-download-attachment',
-          DEFAULT_AUTO_DOWNLOAD_ATTACHMENT
-        );
-
+        let disposition: keyof AutoDownloadAttachmentType | undefined;
         if (isVideo(contentType)) {
-          if (autoDownloadAttachment.videos === false) {
-            return attachment;
-          }
+          disposition = 'videos';
         } else if (isImage(contentType)) {
-          if (autoDownloadAttachment.photos === false) {
-            return attachment;
-          }
+          disposition = 'photos';
         } else if (isAudio(contentType)) {
           if (
-            autoDownloadAttachment.audio === false &&
-            !isVoiceMessage(attachment)
+            isVoiceMessage(attachment) &&
+            attachment.size < MAX_VOICE_MESSAGE_AUTO_DOWNLOAD_SIZE
           ) {
-            return attachment;
+            disposition = undefined;
+          } else {
+            disposition = 'audio';
           }
-        } else if (autoDownloadAttachment.documents === false) {
+        } else {
+          disposition = 'documents';
+        }
+
+        if (
+          disposition != null &&
+          !isAutoDownloadEnabled(attachment, disposition)
+        ) {
           return attachment;
         }
       }
@@ -630,7 +640,7 @@ async function queuePreviews({
   ) => boolean;
 }): Promise<{ preview: Array<LinkPreviewType>; count: number }> {
   const log = getLogger(source);
-  const previewSignatures: Map<string, AttachmentType> = new Map();
+  const previewSignatures = new Map<string, AttachmentType>();
   otherPreviews?.forEach(preview => {
     if (preview.image) {
       cacheAttachmentBySignature(previewSignatures, preview.image);
@@ -673,12 +683,7 @@ async function queuePreviews({
       }
 
       if (!isManualDownload) {
-        const autoDownloadAttachment = itemStorage.get(
-          'auto-download-attachment',
-          DEFAULT_AUTO_DOWNLOAD_ATTACHMENT
-        );
-
-        if (autoDownloadAttachment.photos === false) {
+        if (!isAutoDownloadEnabled(item.image, 'photos')) {
           return item;
         }
       }
@@ -745,7 +750,7 @@ async function queueQuoteAttachments({
 
   // Similar to queueNormalAttachments' logic for detecting same attachments
   // except here we also pick by quote sent timestamp.
-  const thumbnailSignatures: Map<string, ThumbnailType> = new Map();
+  const thumbnailSignatures = new Map<string, ThumbnailType>();
   otherQuotes.forEach(otherQuote => {
     for (const attachment of otherQuote.attachments) {
       if (attachment.thumbnail) {

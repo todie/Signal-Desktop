@@ -1,5 +1,6 @@
 // Copyright 2021 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
+// oxlint-disable max-classes-per-file
 
 import { assert } from 'chai';
 import * as sinon from 'sinon';
@@ -89,7 +90,6 @@ describe('JobQueue', () => {
         maxActive = Math.max(activeJobCount, maxActive);
       };
 
-      // oxlint-disable-next-line max-classes-per-file
       class Queue extends JobQueue<number> {
         parseData(data: unknown): number {
           return parseUnknown(z.number(), data);
@@ -744,7 +744,7 @@ describe('JobQueue', () => {
     });
 
     class FakeStream implements AsyncIterable<StoredJob> {
-      #eventEmitter = new EventEmitter();
+      readonly #eventEmitter = new EventEmitter();
 
       async *[Symbol.asyncIterator]() {
         // oxlint-disable-next-line no-constant-condition
@@ -874,7 +874,7 @@ describe('JobQueue', () => {
 
       await noopQueue.add(undefined);
 
-      sinon.assert.notCalled(fakeStore.stream as sinon.SinonStub);
+      sinon.assert.notCalled(fakeStore.stream);
     });
   });
 });
